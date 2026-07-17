@@ -47,11 +47,13 @@ See [looks.md](looks.md) for what each does.
 /pacman cycle
 ```
 
-Enables cycle mode: on each `agent_start` (each user message turn), the next look in the list is applied. Order:
+Enables cycle mode: on each `agent_start` (each user message turn), the next **short** look is applied. Full-width looks (`classic`, `chase`) are **not** in the rotation — pick them explicitly with `/pacman classic` etc.
 
-`classic → chase → mini → arcade → fruit → (repeat)`
+Order:
 
-**Stop rotate** by locking a look (`/pacman classic`) or hiding (`/pacman off`).
+`mini → arcade → fruit → (repeat)`
+
+**Stop rotate** by locking a look (`/pacman mini`) or hiding (`/pacman off`).
 
 ## Hide
 
@@ -65,23 +67,15 @@ Hides the custom indicator (`frames: []`), clears the list widget, stops rotate.
 
 ## Working message
 
+By default, a **random arcade blurb** is chosen on every agent run (and at session start), e.g. `waka waka...`, `chomping tokens...`, `1-UP...`. It avoids repeating the same line twice in a row.
+
 ```text
 /pacman message chomping tokens...
 /pacman message
 ```
 
-- With text: custom message (overrides the look’s default).
-- Empty: reset to the current look’s default (`waka waka...`, `run from blinky...`, etc.).
-
-## Defaults by look
-
-| Look | Default message |
-|------|-----------------|
-| classic | `waka waka...` |
-| chase | `run from blinky...` |
-| mini | `chomp chomp...` |
-| arcade | `insert coin...` |
-| fruit | `fruit bonus...` |
+- With text: **lock** a custom message (stops auto-random).
+- Empty: back to **auto-random** each run.
 
 ## Persistence
 

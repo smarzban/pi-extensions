@@ -63,5 +63,5 @@ Fixed looks always use **7** cells (`FIXED_CELLS`).
 /pacman mini
 /pacman arcade
 /pacman fruit
-/pacman rotate    # cycle all of the above each message
+/pacman rotate    # cycle mini → arcade → fruit only (not full-width)
 ```

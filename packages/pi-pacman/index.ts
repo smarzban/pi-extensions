@@ -278,8 +278,36 @@ const LOOKS: Look[] = [
 ];
 
 const LOOK_BY_ID = new Map(LOOKS.map((l) => [l.id, l]));
-/** Looks eligible for rotate/random (excludes off/default). */
-const ROTATE_LOOKS = LOOKS.map((l) => l.id);
+/** Rotate only cycles short looks — full-width classic/chase stay opt-in via /pacman <look>. */
+const ROTATE_LOOKS = LOOKS.filter((l) => !l.fullWidth).map((l) => l.id);
+
+/** Fun working-line blurbs; one is picked at random each agent turn (unless custom message). */
+const MESSAGE_POOL = [
+	"waka waka...",
+	"chomp chomp...",
+	"nom nom nom...",
+	"pellet run...",
+	"insert coin...",
+	"high score...",
+	"power pellet...",
+	"ghost house...",
+	"fruit bonus...",
+	"1-UP...",
+	"extra life...",
+	"maze clear...",
+	"level up...",
+	"arcade mode...",
+	"thinking in 8-bit...",
+	"chomping tokens...",
+	"munching context...",
+	"dot duty...",
+	"blinky inbound...",
+	"tunnel warp...",
+	"still hungry...",
+	"just one more pellet...",
+	"pac-ing thoughts...",
+	"busy in the maze...",
+];
 
 type Mode = string;
 
@@ -341,18 +369,28 @@ function defaultMessageFor(mode: Mode): string | undefined {
 	return LOOK_BY_ID.get(mode)?.message;
 }
 
+function pickRandomMessage(previous?: string): string {
+	const pool =
+		previous && MESSAGE_POOL.length > 1
+			? MESSAGE_POOL.filter((m) => m !== previous)
+			: MESSAGE_POOL;
+	return pool[Math.floor(Math.random() * pool.length)]!;
+}
+
 function listLooks(): string {
 	const lines = LOOKS.map((l) => {
 		const tag = l.fullWidth ? " (full width)" : "";
-		return `  ${l.id.padEnd(8)} ${l.blurb}${tag}`;
+		const rot = !l.fullWidth ? " · in rotate" : "";
+		return `  ${l.id.padEnd(8)} ${l.blurb}${tag}${rot}`;
 	});
 	return [
 		"Pac-Man looks:",
 		...lines,
 		"",
-		"  rotate   Different look each message (cycle)",
+		"  rotate   Cycle short looks each message (mini/arcade/fruit)",
 		"  off      Hide indicator",
 		"",
+		"Working text is random each run (unless /pacman message …).",
 		"Pick a look name to lock it (stops rotate).",
 	].join("\n");
 }
@@ -376,6 +414,8 @@ export default function (pi: ExtensionAPI) {
 		typeof saved.customMessage === "string" && saved.customMessage.length > 0
 			? saved.customMessage
 			: undefined;
+	/** Last auto-picked blurb (not persisted); used to avoid immediate repeats. */
+	let autoMessage: string = pickRandomMessage();
 	let lastUi: ExtensionUIContext | undefined;
 
 	const persist = () => {
@@ -392,11 +432,22 @@ export default function (pi: ExtensionAPI) {
 		return `ᗧ ${mode}${rotate ? " ↻" : ""}`;
 	};
 
+	const workingMessage = (): string => {
+		if (mode === "off") return " ";
+		if (customMessage) return customMessage;
+		return autoMessage;
+	};
+
+	const refreshAutoMessage = () => {
+		if (customMessage) return;
+		autoMessage = pickRandomMessage(autoMessage);
+	};
+
 	const apply = (ctx: ExtensionContext) => {
 		lastUi = ctx.ui;
-		const message = customMessage ?? defaultMessageFor(mode) ?? "Working...";
+		const message = workingMessage();
 		ctx.ui.setWorkingIndicator(getIndicator(mode, message));
-		ctx.ui.setWorkingMessage(mode === "off" ? " " : message);
+		ctx.ui.setWorkingMessage(message);
 		ctx.ui.setStatus("pacman-thinking", ctx.ui.theme.fg("dim", statusLabel()));
 		persist();
 	};
@@ -404,13 +455,14 @@ export default function (pi: ExtensionAPI) {
 	const isFullWidthMode = () => LOOK_BY_ID.get(mode)?.fullWidth === true;
 
 	const pickNextRotatedLook = () => {
+		if (ROTATE_LOOKS.length === 0) return;
 		mode = ROTATE_LOOKS[rotateIndex % ROTATE_LOOKS.length]!;
 		rotateIndex++;
 	};
 
 	const reapplyIfFullWidth = () => {
 		if (!lastUi || !isFullWidthMode()) return;
-		const message = customMessage ?? defaultMessageFor(mode) ?? "Working...";
+		const message = workingMessage();
 		lastUi.setWorkingIndicator(getIndicator(mode, message));
 	};
 
@@ -418,16 +470,20 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		// Don't advance rotate here — agent_start picks per message.
+		refreshAutoMessage();
 		apply(ctx);
 	});
 
 	pi.on("agent_start", async (_event, ctx) => {
+		// Fresh random blurb every run (unless user set /pacman message)
+		refreshAutoMessage();
 		if (rotate) {
 			pickNextRotatedLook();
 			apply(ctx);
 			return;
 		}
-		if (isFullWidthMode()) apply(ctx);
+		// Always re-apply so the new message (and full-width width) stick
+		apply(ctx);
 	});
 
 	pi.registerCommand("pacman", {
@@ -435,15 +491,16 @@ export default function (pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			const raw = args.trim();
 			if (!raw) {
-				const msg = customMessage ?? defaultMessageFor(mode) ?? "Working...";
+				const msg = workingMessage();
 				const extra = isFullWidthMode()
 					? ` · width ${indicatorWidth(msg)} cells`
 					: LOOK_BY_ID.has(mode)
 						? ` · width ${FIXED_CELLS} cells`
 						: "";
-				const rotInfo = rotate ? " · rotate on" : "";
+				const rotInfo = rotate ? " · rotate on (short looks)" : "";
+				const msgMode = customMessage ? "custom" : "auto";
 				ctx.ui.notify(
-					`Pac-Man: ${describeMode(mode)}${rotInfo} · message: "${msg}"${extra}`,
+					`Pac-Man: ${describeMode(mode)}${rotInfo} · message (${msgMode}): "${msg}"${extra}`,
 					"info",
 				);
 				return;
@@ -470,11 +527,12 @@ export default function (pi: ExtensionAPI) {
 			if (head === "message") {
 				const text = rest.join(" ").trim();
 				customMessage = text.length > 0 ? text : undefined;
+				if (!customMessage) refreshAutoMessage();
 				apply(ctx);
 				ctx.ui.notify(
 					customMessage
-						? `Working message set to: ${customMessage}`
-						: "Working message reset to mode default",
+						? `Working message locked to: ${customMessage}`
+						: `Working message is auto again (now: "${autoMessage}")`,
 					"info",
 				);
 				return;
@@ -482,12 +540,14 @@ export default function (pi: ExtensionAPI) {
 
 			if (head === "rotate" || head === "cycle") {
 				rotate = true;
+				// Only short looks participate; jump into that cycle cleanly
 				const idx = ROTATE_LOOKS.indexOf(mode);
 				rotateIndex = idx >= 0 ? idx : 0;
 				pickNextRotatedLook();
+				refreshAutoMessage();
 				apply(ctx);
 				ctx.ui.notify(
-					`Pac-Man rotate on — cycles each message (now: ${mode}). Pick a look to lock it.`,
+					`Pac-Man rotate on — short looks only: ${ROTATE_LOOKS.join(", ")} (now: ${mode}).`,
 					"info",
 				);
 				return;
