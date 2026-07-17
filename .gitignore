@@ -1,0 +1,7 @@
+# AGENTS.local.md is the private, per-working-copy overlay — never committed.
+AGENTS.local.md
+
+node_modules/
+.pi/
+*.tgz
+.DS_Store

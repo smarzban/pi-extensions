@@ -1,0 +1,34 @@
+{
+	"name": "pi-pacman",
+	"version": "0.1.0",
+	"description": "Pac-Man working indicator for pi — replaces the streaming spinner with pellet runs, ghost chases, and more",
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"pacman",
+		"working-indicator",
+		"coding-agent"
+	],
+	"author": "Saeed Marzban",
+	"license": "MIT",
+	"engines": {
+		"node": ">=18.0.0"
+	},
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"files": [
+		"index.ts",
+		"README.md",
+		"LICENSE"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"prepublishOnly": "node -e \"require('fs').accessSync('index.ts')\""
+	}
+}

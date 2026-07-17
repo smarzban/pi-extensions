@@ -1,0 +1,13 @@
+{
+	"name": "pi-extentions",
+	"private": true,
+	"description": "Pi extensions monorepo",
+	"workspaces": [
+		"packages/*"
+	],
+	"devDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-ai": "*",
+		"@earendil-works/pi-tui": "*"
+	}
+}
