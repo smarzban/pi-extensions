@@ -2,9 +2,17 @@
 	"name": "pi-extentions",
 	"private": true,
 	"description": "Pi extensions monorepo",
+	"keywords": [
+		"pi-package"
+	],
 	"workspaces": [
 		"packages/*"
 	],
+	"pi": {
+		"extensions": [
+			"./packages/pi-pacman"
+		]
+	},
 	"devDependencies": {
 		"@earendil-works/pi-coding-agent": "*",
 		"@earendil-works/pi-ai": "*",
