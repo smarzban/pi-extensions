@@ -6,6 +6,8 @@
 
 | I want to… | Go to |
 |------------|--------|
+| Pac-Man indicator | [../packages/pi-pacman/README.md](../packages/pi-pacman/README.md) |
+| Statusline footer | [../packages/pi-statusline/README.md](../packages/pi-statusline/README.md) |
 | See it work in under a minute | [quickstart.md](quickstart.md) |
 | Install or switch install methods | [install/](install/README.md) |
 | Learn every `/pacman` command | [usage/commands.md](usage/commands.md) |

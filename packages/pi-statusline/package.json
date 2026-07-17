@@ -1,0 +1,43 @@
+{
+	"name": "@pi-extensions/pi-statusline",
+	"version": "0.1.0",
+	"description": "Custom pi footer: session name, model/effort, context, provider usage, git branch/PR/diff",
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"statusline",
+		"footer",
+		"coding-agent"
+	],
+	"author": "Saeed Marzban",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/smarzban/pi-extensions.git",
+		"directory": "packages/pi-statusline"
+	},
+	"bugs": {
+		"url": "https://github.com/smarzban/pi-extensions/issues"
+	},
+	"homepage": "https://github.com/smarzban/pi-extensions/tree/main/packages/pi-statusline#readme",
+	"engines": {
+		"node": ">=18.0.0"
+	},
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"files": [
+		"index.ts",
+		"README.md",
+		"LICENSE"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"prepublishOnly": "node -e \"require('fs').accessSync('index.ts')\""
+	}
+}

@@ -10,7 +10,8 @@
 	],
 	"pi": {
 		"extensions": [
-			"./packages/pi-pacman"
+			"./packages/pi-pacman",
+			"./packages/pi-statusline"
 		]
 	},
 	"devDependencies": {
