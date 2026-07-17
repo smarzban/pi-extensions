@@ -44,11 +44,14 @@ interface UsageSnapshot {
 
 interface GitState {
 	branch: string | null;
-	dirty: boolean;
 	ahead: number;
 	behind: number;
-	/** Changed file count (modified + untracked + etc.) */
-	changed: number;
+	/** Staged index changes (+) */
+	staged: number;
+	/** Unstaged worktree changes (*) */
+	unstaged: number;
+	/** Untracked files (?) */
+	untracked: number;
 }
 
 // ── constants ────────────────────────────────────────────────────────
@@ -241,109 +244,31 @@ async function fetchCodexUsage(): Promise<UsageSnapshot> {
 	}
 }
 
-/** OpenCode Go: no stable public remaining-% API yet; return empty so headers can fill in. */
-async function fetchOpenCodeGoUsage(): Promise<UsageSnapshot> {
-	const key =
-		authField("opencode-go", "key", "access") || process.env.OPENCODE_API_KEY;
-	if (!key) {
-		return {
-			provider: "OpenCode Go",
-			windows: [],
-			error: "no-auth",
-			fetchedAt: Date.now(),
-		};
-	}
-	// Auth check only — models list proves the key works.
-	try {
-		const res = await fetchWithTimeout("https://opencode.ai/zen/v1/models", {
-			headers: { Authorization: `Bearer ${key}` },
-		});
-		if (!res.ok) {
-			return {
-				provider: "OpenCode Go",
-				windows: [],
-				error: `HTTP ${res.status}`,
-				fetchedAt: Date.now(),
-			};
-		}
-		return {
-			provider: "OpenCode Go",
-			windows: [],
-			error: "no-usage-endpoint",
-			fetchedAt: Date.now(),
-		};
-	} catch (e) {
-		return {
-			provider: "OpenCode Go",
-			windows: [],
-			error: String(e),
-			fetchedAt: Date.now(),
-		};
-	}
-}
-
-/** xAI: OAuth works for chat; remaining-% is not exposed on a public endpoint for OAuth users. */
-async function fetchXaiUsage(): Promise<UsageSnapshot> {
-	const token = authField("xai", "access", "key") || process.env.XAI_API_KEY;
-	if (!token) {
-		return { provider: "xAI", windows: [], error: "no-auth", fetchedAt: Date.now() };
-	}
-	try {
-		const res = await fetchWithTimeout("https://api.x.ai/v1/models", {
-			headers: { Authorization: `Bearer ${token}` },
-		});
-		if (!res.ok) {
-			return {
-				provider: "xAI",
-				windows: [],
-				error: `HTTP ${res.status}`,
-				fetchedAt: Date.now(),
-			};
-		}
-		return {
-			provider: "xAI",
-			windows: [],
-			error: "no-usage-endpoint",
-			fetchedAt: Date.now(),
-		};
-	} catch (e) {
-		return { provider: "xAI", windows: [], error: String(e), fetchedAt: Date.now() };
-	}
-}
-
+/** Only Codex exposes a reliable remaining-% API with pi auth. */
 const PROVIDER_MAP: Record<string, string> = {
 	"openai-codex": "codex",
-	openai: "codex", // treat plain openai like codex only if codex creds exist
-	"opencode-go": "opencode-go",
-	xai: "xai",
 };
 
 async function fetchUsageFor(key: string): Promise<UsageSnapshot> {
-	switch (key) {
-		case "codex":
-			return fetchCodexUsage();
-		case "opencode-go":
-			return fetchOpenCodeGoUsage();
-		case "xai":
-			return fetchXaiUsage();
-		default:
-			return {
-				provider: "Unknown",
-				windows: [],
-				error: "unknown-provider",
-				fetchedAt: Date.now(),
-			};
-	}
+	if (key === "codex") return fetchCodexUsage();
+	return {
+		provider: "Unknown",
+		windows: [],
+		error: "unknown-provider",
+		fetchedAt: Date.now(),
+	};
 }
 
 // ── git + PR ─────────────────────────────────────────────────────────
 
 function parseGitStatus(output: string): GitState {
 	let branch: string | null = null;
-	let dirty = false;
 	let ahead = 0;
 	let behind = 0;
-	let changed = 0;
+	let staged = 0;
+	let unstaged = 0;
+	let untracked = 0;
+
 	for (const line of output.split("\n")) {
 		if (!line) continue;
 		if (line.startsWith("# branch.head ")) {
@@ -359,12 +284,26 @@ function parseGitStatus(output: string): GitState {
 			}
 			continue;
 		}
-		if (!line.startsWith("# ")) {
-			dirty = true;
-			changed++;
+		// Untracked
+		if (line.startsWith("? ")) {
+			untracked++;
+			continue;
+		}
+		// Ordinary / rename / copy: "1 XY ..." or "2 XY ..."
+		if (line.startsWith("1 ") || line.startsWith("2 ")) {
+			const xy = line.slice(2, 4); // two status chars
+			const x = xy[0] ?? ".";
+			const y = xy[1] ?? ".";
+			if (x !== ".") staged++;
+			if (y !== ".") unstaged++;
+			continue;
+		}
+		// Unmerged
+		if (line.startsWith("u ")) {
+			unstaged++;
 		}
 	}
-	return { branch, dirty, ahead, behind, changed };
+	return { branch, ahead, behind, staged, unstaged, untracked };
 }
 
 function readGit(cwd: string): GitState | null {
@@ -403,59 +342,6 @@ function readPrNumber(cwd: string): number | null {
 		return null;
 	}
 }
-
-// ── rate-limit headers (fallback for xAI / OpenCode Go) ──────────────
-
-function usageFromHeaders(
-	providerLabel: string,
-	headers: Record<string, string | undefined>,
-): UsageSnapshot | null {
-	const lower: Record<string, string> = {};
-	for (const [k, v] of Object.entries(headers)) {
-		if (v != null) lower[k.toLowerCase()] = v;
-	}
-
-	const remaining =
-		lower["x-ratelimit-remaining"] ??
-		lower["x-ratelimit-remaining-requests"] ??
-		lower["ratelimit-remaining"];
-	const limit =
-		lower["x-ratelimit-limit"] ??
-		lower["x-ratelimit-limit-requests"] ??
-		lower["ratelimit-limit"];
-	const reset =
-		lower["x-ratelimit-reset"] ??
-		lower["x-ratelimit-reset-requests"] ??
-		lower["ratelimit-reset"];
-
-	if (remaining == null || limit == null) return null;
-	const rem = Number(remaining);
-	const lim = Number(limit);
-	if (!Number.isFinite(rem) || !Number.isFinite(lim) || lim <= 0) return null;
-
-	const usedPercent = clampPercent(((lim - rem) / lim) * 100);
-	let resetsIn: string | undefined;
-	if (reset) {
-		const asNum = Number(reset);
-		if (Number.isFinite(asNum)) {
-			// seconds-until or unix timestamp
-			const date =
-				asNum > 1e12
-					? new Date(asNum)
-					: asNum > 1e9
-						? new Date(asNum * 1000)
-						: new Date(Date.now() + asNum * 1000);
-			resetsIn = formatResetTime(date);
-		}
-	}
-
-	return {
-		provider: providerLabel,
-		windows: [{ label: "req", usedPercent, resetsIn }],
-		fetchedAt: Date.now(),
-	};
-}
-
 
 // ── editor top-border helper ─────────────────────────────────────────
 
@@ -537,15 +423,8 @@ export default function (pi: ExtensionAPI) {
 				if (u.windows.length === 0 && u.error && cached?.windows.length) {
 					return;
 				}
-				// Prefer header-derived windows if API has none
-				if (u.windows.length === 0 && cached?.windows.length && cached.error === "from-headers") {
-					latestUsage = cached;
-					tuiRef?.requestRender();
-					return;
-				}
 				if (u.windows.length > 0) usageCache.set(key, u);
-				latestUsage = u.windows.length > 0 ? u : latestUsage;
-				if (u.windows.length === 0) latestUsage = u;
+				latestUsage = u;
 				tuiRef?.requestRender();
 			})
 			.catch(() => {});
@@ -553,10 +432,6 @@ export default function (pi: ExtensionAPI) {
 
 	const detectUsageKey = (provider: string | undefined): string | null => {
 		if (!provider) return null;
-		if (provider === "openai") {
-			// Only map openai → codex when codex creds exist
-			return getCodexCreds() ? "codex" : null;
-		}
 		return PROVIDER_MAP[provider] ?? null;
 	};
 
@@ -609,7 +484,7 @@ export default function (pi: ExtensionAPI) {
 			: theme.fg("accent", modelId);
 		const modelSeg = bracket(theme, modelInner);
 
-		// context
+		// context — color: default <50%, warning ≥50%, error ≥70%
 		const cu = ctx.getContextUsage?.();
 		const total = cu?.contextWindow ?? ctx.model?.contextWindow ?? 0;
 		const used = cu?.tokens ?? null;
@@ -619,20 +494,37 @@ export default function (pi: ExtensionAPI) {
 				: used != null && total > 0
 					? Math.round((used / total) * 100)
 					: null;
+		const ctxColor =
+			pct == null ? "dim" : pct >= 70 ? "error" : pct >= 50 ? "warning" : "success";
 		let ctxInner = dim("ctx —");
 		if (pct != null && used != null && total > 0) {
 			ctxInner =
-				theme.fg("warning", `ctx ${pct}%`) +
+				theme.fg(ctxColor, `ctx ${pct}%`) +
 				dim(" · ") +
-				dim(`${formatTokens(used)}/${formatTokens(total)}`);
+				theme.fg(ctxColor, `${formatTokens(used)}/${formatTokens(total)}`);
 		} else if (total > 0) {
 			ctxInner = dim(`ctx ?/${formatTokens(total)}`);
 		}
 		const ctxSeg = bracket(theme, ctxInner);
 
-		// provider usage (always show a slot for supported active providers)
+		// session $ cost (from assistant usage.cost.total across the session)
+		let totalCost = 0;
+		try {
+			for (const e of ctx.sessionManager.getEntries()) {
+				if (e.type === "message" && (e as any).message?.role === "assistant") {
+					totalCost += Number((e as any).message?.usage?.cost?.total) || 0;
+				}
+			}
+		} catch {
+			// ignore
+		}
+		const costSeg =
+			totalCost > 0
+				? bracket(theme, dim(`$${totalCost.toFixed(3)}`))
+				: "";
+
+		// provider usage — Codex only (when windows available)
 		const usageSegs: string[] = [];
-		const usageKey = detectUsageKey(ctx.model?.provider);
 		if (latestUsage?.windows.length) {
 			for (const w of latestUsage.windows) {
 				const rem = Math.round(100 - w.usedPercent);
@@ -643,36 +535,22 @@ export default function (pi: ExtensionAPI) {
 					(w.resetsIn ? dim(" · ") + dim(w.resetsIn) : "");
 				usageSegs.push(bracket(theme, body));
 			}
-		} else if (usageKey) {
-			// Slot is intentional: codex has a real API; xAI / OpenCode Go often don't.
-			const label =
-				latestUsage?.provider ||
-				(usageKey === "codex"
-					? "Codex"
-					: usageKey === "xai"
-						? "xAI"
-						: "OpenCode Go");
-			const why =
-				latestUsage?.error === "no-auth"
-					? "no auth"
-					: latestUsage?.error === "no-usage-endpoint"
-						? "no quota API"
-						: latestUsage?.error?.startsWith("HTTP")
-							? latestUsage.error
-							: "…";
-			usageSegs.push(bracket(theme, dim(`${label} ${why}`)));
 		}
 
-		// branch + diff
+		// branch + staged(+) / unstaged(*) / untracked(?)
 		const branch = git?.branch || footerData?.getGitBranch() || null;
 		let gitSeg = "";
 		if (branch) {
-			const color = git?.dirty ? "warning" : "success";
-			let g = theme.fg(color, branch);
-			if (git?.dirty) {
-				const n = git.changed > 0 ? git.changed : "";
-				g += theme.fg("warning", n ? ` *${n}` : " *");
-			}
+			const dirty =
+				(git?.staged ?? 0) + (git?.unstaged ?? 0) + (git?.untracked ?? 0) > 0;
+			const color = dirty ? "warning" : "success";
+			// branch sign + name
+			let g = theme.fg(color, `⎇ ${branch}`);
+			const bits: string[] = [];
+			if (git?.staged) bits.push(theme.fg("success", `+${git.staged}`));
+			if (git?.unstaged) bits.push(theme.fg("warning", `*${git.unstaged}`));
+			if (git?.untracked) bits.push(theme.fg("muted", `?${git.untracked}`));
+			if (bits.length) g += " " + bits.join(" ");
 			if (git?.ahead) g += theme.fg("success", ` ↑${git.ahead}`);
 			if (git?.behind) g += theme.fg("error", ` ↓${git.behind}`);
 			gitSeg = bracket(theme, g);
@@ -683,7 +561,7 @@ export default function (pi: ExtensionAPI) {
 			prNumber != null ? bracket(theme, theme.fg("accent", `#${prNumber}`)) : "";
 
 		const sep = "  ";
-		const parts = [modelSeg, ctxSeg, ...usageSegs, gitSeg, prSeg].filter(Boolean);
+		const parts = [modelSeg, ctxSeg, costSeg, ...usageSegs, gitSeg, prSeg].filter(Boolean);
 		const lines: string[] = [];
 		let current = "";
 		for (const p of parts) {
@@ -810,21 +688,6 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("turn_end", async (_event, ctx) => {
 		refreshGit(ctx.cwd);
-	});
-
-	pi.on("after_provider_response", async (event, ctx) => {
-		const provider = ctx.model?.provider;
-		const key = detectUsageKey(provider);
-		if (!key || key === "codex") return; // codex has a real usage API
-		const label = key === "xai" ? "xAI" : "OpenCode Go";
-		const fromHeaders = usageFromHeaders(label, event.headers ?? {});
-		if (!fromHeaders?.windows.length) return;
-		fromHeaders.error = "from-headers";
-		usageCache.set(key, fromHeaders);
-		if (activeUsageKey === key) {
-			latestUsage = fromHeaders;
-			tuiRef?.requestRender();
-		}
 	});
 
 	// ── command ──────────────────────────────────────────────────────

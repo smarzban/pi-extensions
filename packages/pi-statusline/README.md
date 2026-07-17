@@ -8,9 +8,10 @@ Part of the [pi-extensions](https://github.com/smarzban/pi-extensions) monorepo.
 
 - **Session name on the text-box top border** — `──────── the-name ─` (right-aligned on the top edge)
 - **Model · effort** from the active model + thinking level
-- **Context** as `ctx N% · used/total` from `getContextUsage()`
-- **Provider remaining** for supported subscriptions (when the provider exposes it)
-- **Git** branch, dirty `*`, ahead/behind; **PR** number via `gh` when available
+- **Context** as `ctx N% · used/total` — green below 50%, yellow at 50%+, red at 70%+
+- **Session cost** `$x.xxx` from assistant `usage.cost.total` when non-zero
+- **Provider remaining** for **openai-codex** only (real quota windows)
+- **Git** `⎇ branch +staged *unstaged ?untracked` plus ahead/behind; **PR** via `gh` when present
 
 ## Quickstart
 
@@ -32,7 +33,7 @@ Example:
 ──────────────────── my task ─
 │ type here…                 │
 ─────────────────────────────
-[gpt-5.4 · high]  [ctx 12% · 24k/200k]  [5h 80% rem · 4h]  [main * ↑1]  [#12]
+[gpt-5.4 · high]  [ctx 12% · 24k/200k]  [$0.042]  [5h 80% rem · 4h]  [⎇ main +1 *2 ?1]  [#12]
 ```
 
 ## Commands
@@ -48,11 +49,13 @@ Example:
 
 | Provider id in pi | Remaining / windows | Auth source |
 |-------------------|---------------------|-------------|
-| `openai-codex` | Primary + secondary windows (`used%` + reset) | `~/.pi/agent/auth.json` → `openai-codex`, or `~/.codex/auth.json` |
-| `opencode-go` | Best-effort (response rate-limit headers when present) | `opencode-go` key / `OPENCODE_API_KEY` |
-| `xai` | Best-effort (response rate-limit headers when present) | `/login xai` OAuth in `auth.json` |
+| `openai-codex` | Primary + secondary windows (`% rem` + reset time) | `~/.pi/agent/auth.json` → `openai-codex`, or `~/.codex/auth.json` |
 
-Codex uses ChatGPT’s subscription usage endpoint (same family as other pi footers). OpenCode Go and xAI do not currently expose a stable public remaining-% API that works with pi’s stored credentials; when response headers include ratelimit fields, those are shown. Otherwise the usage segment is omitted.
+Other providers (xAI, OpenCode Go, …) have no reliable remaining-% API with pi’s credentials, so that segment is omitted for them.
+
+## Costs
+
+Yes — pi exposes per-assistant-message `usage.cost.total` (USD estimate from model pricing). The footer sums those across the session and shows `$x.xxx` when non-zero. Subscription OAuth turns may still report a computed cost even when you are not billed per-token.
 
 ## Install methods
 
