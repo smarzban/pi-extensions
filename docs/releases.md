@@ -1,6 +1,6 @@
 # Releases
 
-How `@pi-extentions/pi-pacman` gets to npm (npm org: **pi-extentions**). Same pattern as
+How `@pi-extensions/pi-pacman` gets to npm (npm org: **pi-extensions**). Same pattern as
 [empanel](https://github.com/smarzban/empanel): **tag → GitHub Actions → OIDC trusted publishing**.
 No long-lived npm token in the repo.
 
@@ -30,7 +30,7 @@ npm publish --access public --otp=XXXXXX   # 6 digits only, not npm_…
 
 ### 2. Link Trusted Publisher on npmjs.com
 
-1. Open https://www.npmjs.com/package/@pi-extentions/pi-pacman → **Settings** → **Trusted Publisher**
+1. Open https://www.npmjs.com/package/@pi-extensions/pi-pacman → **Settings** → **Trusted Publisher**
 2. Add GitHub Actions:
    - **Organization or user:** `smarzban`
    - **Repository:** `pi-extentions`
@@ -59,9 +59,9 @@ git push origin v0.1.1
 4. Watch **Actions → release**. On success:
 
 ```bash
-pi install npm:@pi-extentions/pi-pacman
+pi install npm:@pi-extensions/pi-pacman
 # or pin
-pi install npm:@pi-extentions/pi-pacman@0.1.1
+pi install npm:@pi-extensions/pi-pacman@0.1.1
 ```
 
 ## What the workflow does
@@ -77,7 +77,7 @@ File: [`.github/workflows/release.yml`](../.github/workflows/release.yml)
 ## Install options (users)
 
 ```bash
-pi install npm:@pi-extentions/pi-pacman
+pi install npm:@pi-extensions/pi-pacman
 pi install git:github.com/smarzban/pi-extentions
 pi install /path/to/pi-extentions/packages/pi-pacman
 ```

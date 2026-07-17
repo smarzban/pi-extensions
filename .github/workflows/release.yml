@@ -1,9 +1,9 @@
-# Release: publish @pi-extentions/pi-pacman to npm on a version tag, via OIDC trusted publishing.
+# Release: publish @pi-extensions/pi-pacman to npm on a version tag, via OIDC trusted publishing.
 #
 # ARMED BUT UNFIRED until BOTH one-time maintainer steps are done (see docs/releases.md):
-#   1. First-publish @pi-extentions/pi-pacman once (granular token w/ bypass 2FA, or OTP) so the
-#      package exists under the pi-extentions npm org (trusted publishers need an existing package).
-#   2. On npmjs.com → @pi-extentions/pi-pacman → Settings → Trusted Publisher:
+#   1. First-publish @pi-extensions/pi-pacman once (granular token w/ bypass 2FA, or OTP) so the
+#      package exists under the pi-extensions npm org (trusted publishers need an existing package).
+#   2. On npmjs.com → @pi-extensions/pi-pacman → Settings → Trusted Publisher:
 #        Organization/user: smarzban
 #        Repository:        pi-extentions
 #        Workflow filename: release.yml

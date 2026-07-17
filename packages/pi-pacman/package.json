@@ -1,5 +1,5 @@
 {
-	"name": "@pi-extentions/pi-pacman",
+	"name": "@pi-extensions/pi-pacman",
 	"version": "0.1.0",
 	"description": "Pac-Man working indicator for pi — replaces the streaming spinner with pellet runs, ghost chases, and more",
 	"type": "module",
