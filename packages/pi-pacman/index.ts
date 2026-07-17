@@ -364,11 +364,6 @@ function describeMode(mode: Mode): string {
 	return look ? `${look.id} — ${look.blurb}` : mode;
 }
 
-function defaultMessageFor(mode: Mode): string | undefined {
-	if (mode === "off") return " ";
-	return LOOK_BY_ID.get(mode)?.message;
-}
-
 function pickRandomMessage(previous?: string): string {
 	const pool =
 		previous && MESSAGE_POOL.length > 1
