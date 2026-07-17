@@ -8,7 +8,7 @@ Replaces the streaming spinner with pellet runs, ghost chases, arcade tunnels, a
 
 ```bash
 # from npm (after publish)
-pi install npm:pi-pacman
+pi install npm:@pi-extentions/pi-pacman
 
 # local path (this monorepo)
 pi install /absolute/path/to/pi-extentions/packages/pi-pacman
@@ -28,8 +28,8 @@ One-time: reservation publish with OTP + Trusted Publisher on npmjs.com (same do
 Then anyone can:
 
 ```bash
-pi install npm:pi-pacman
-pi install npm:pi-pacman@0.1.0
+pi install npm:@pi-extentions/pi-pacman
+pi install npm:@pi-extentions/pi-pacman@0.1.0
 ```
 
 ## Commands

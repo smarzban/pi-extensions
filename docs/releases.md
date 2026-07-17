@@ -1,29 +1,36 @@
 # Releases
 
-How `pi-pacman` gets to npm. Same pattern as [empanel](https://github.com/smarzban/empanel):
-**tag → GitHub Actions → OIDC trusted publishing**. No long-lived npm token in the repo.
+How `@pi-extentions/pi-pacman` gets to npm (npm org: **pi-extentions**). Same pattern as
+[empanel](https://github.com/smarzban/empanel): **tag → GitHub Actions → OIDC trusted publishing**.
+No long-lived npm token in the repo.
 
 ## One-time setup (maintainer)
 
-### 1. Reservation publish (OTP, once)
+### 1. First publish (create the package under the org)
 
 npm only lets you attach a Trusted Publisher to a package that **already exists**.
 
+With **passkey** 2FA (no 6-digit OTP), use a granular access token that can publish to the
+`pi-extentions` org and has **Bypass two-factor authentication** enabled:
+
 ```bash
+npm config set //registry.npmjs.org/:_authToken=npm_YOUR_TOKEN
+
 cd packages/pi-pacman
-# use a real 6-digit authenticator code — not an npm_ token
-npm publish --access public --otp=XXXXXX
+npm publish --access public
 ```
 
-If `0.1.0` is what you want live first, publish that. If you prefer a stub:
+(`publishConfig.access` is already `"public"` — required for scoped packages.)
+
+If you use an authenticator app instead:
 
 ```bash
-# temporarily set "version": "0.0.1", publish, then bump back to 0.1.0 for the real tag release
+npm publish --access public --otp=XXXXXX   # 6 digits only, not npm_…
 ```
 
 ### 2. Link Trusted Publisher on npmjs.com
 
-1. Open https://www.npmjs.com/package/pi-pacman → **Settings** → **Trusted Publisher**
+1. Open https://www.npmjs.com/package/@pi-extentions/pi-pacman → **Settings** → **Trusted Publisher**
 2. Add GitHub Actions:
    - **Organization or user:** `smarzban`
    - **Repository:** `pi-extentions`
@@ -52,9 +59,9 @@ git push origin v0.1.1
 4. Watch **Actions → release**. On success:
 
 ```bash
-pi install npm:pi-pacman
+pi install npm:@pi-extentions/pi-pacman
 # or pin
-pi install npm:pi-pacman@0.1.1
+pi install npm:@pi-extentions/pi-pacman@0.1.1
 ```
 
 ## What the workflow does
@@ -70,7 +77,7 @@ File: [`.github/workflows/release.yml`](../.github/workflows/release.yml)
 ## Install options (users)
 
 ```bash
-pi install npm:pi-pacman
+pi install npm:@pi-extentions/pi-pacman
 pi install git:github.com/smarzban/pi-extentions
 pi install /path/to/pi-extentions/packages/pi-pacman
 ```

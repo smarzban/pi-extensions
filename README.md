@@ -10,7 +10,7 @@ Extensions for [pi](https://github.com/earendil-works/pi), the terminal-based co
 
 ```bash
 # from npm (after publish)
-pi install npm:pi-pacman
+pi install npm:@pi-extentions/pi-pacman
 
 # from this git repo (package path)
 pi install git:github.com/smarzban/pi-extentions
