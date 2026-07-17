@@ -12,6 +12,15 @@
 	],
 	"author": "Saeed Marzban",
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/smarzban/pi-extentions.git",
+		"directory": "packages/pi-pacman"
+	},
+	"bugs": {
+		"url": "https://github.com/smarzban/pi-extentions/issues"
+	},
+	"homepage": "https://github.com/smarzban/pi-extentions/tree/main/packages/pi-pacman#readme",
 	"engines": {
 		"node": ">=18.0.0"
 	},

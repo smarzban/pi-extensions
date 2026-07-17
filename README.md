@@ -12,6 +12,9 @@ Extensions for [pi](https://github.com/earendil-works/pi), the terminal-based co
 # from npm (after publish)
 pi install npm:pi-pacman
 
+# from this git repo (package path)
+pi install git:github.com/smarzban/pi-extentions
+
 # local path (this monorepo)
 pi install /absolute/path/to/pi-extentions/packages/pi-pacman
 ```
