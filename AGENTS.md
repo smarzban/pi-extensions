@@ -24,6 +24,7 @@ installable) on its own. Modeled after [ogulcancelik/pi-extensions](https://gith
 ```
 packages/
   pi-pacman/            # Pac-Man working indicator
+  pi-statusline/        # Custom footer statusline
 ```
 
 Each package has its own `package.json` with `"pi": { "extensions": [...] }` declaring entry points.
@@ -32,7 +33,7 @@ Each package has its own `package.json` with `"pi": { "extensions": [...] }` dec
 
 - Build: none — extensions are TypeScript loaded by pi via jiti (no compile step)
 - Test: per-package if present (none yet for pi-pacman)
-- Canonical verify: `cd packages/pi-pacman && npm pack --dry-run`
+- Canonical verify: `cd packages/pi-pacman && npm pack --dry-run` (same for each package under `packages/*`)
 - Install local package into pi: `pi install /absolute/path/to/pi-extensions/packages/pi-<name>`
 - Publish: bump version on `main`, tag `vX.Y.Z` matching `package.json`, push tag → `.github/workflows/release.yml` (OIDC). See [docs/releases.md](docs/releases.md).
 
