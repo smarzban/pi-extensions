@@ -7,10 +7,10 @@ Part of the [pi-extensions](https://github.com/smarzban/pi-extensions) monorepo.
 ## Highlights
 
 - **Drop-in working indicator** — uses `setWorkingIndicator` / `setWorkingMessage` (normal streaming only)
-- **Five looks** — full-width `classic` & `chase`, plus 7-cell `mini`, `arcade`, `fruit`
+- **Five looks** — full-width `classic` & `chase`, plus fixed-width `mini`, `arcade`, `fruit` (default 10 cells, configurable)
 - **Rotate mode** — cycle short looks every agent message (`/pacman rotate`)
 - **Random working blurbs** — arcade + AI/token-flavored lines each run (or lock your own)
-- **Remembers your choice** — look, rotate, and custom message in `~/.pi/agent/pacman-thinking.json`
+- **Remembers your choice** — look, rotate, cells, and custom message in `~/.pi/agent/pacman-thinking.json`
 
 ## Quickstart
 
@@ -44,16 +44,18 @@ More detail: [docs/install](../../docs/install/README.md).
 /pacman list
 /pacman chase
 /pacman rotate
+/pacman cells 12
 /pacman message chomping tokens...
 /pacman off
 ```
 
 | Command | Result |
 |---------|--------|
-| `/pacman` | Current look, rotate, message, strip width |
+| `/pacman` | Current look, rotate, cells, message, strip width |
 | `/pacman list` | Catalog under the editor |
 | `/pacman <look>` | Lock a look (stops rotate) |
 | `/pacman rotate` | Cycle short looks every message |
+| `/pacman cells [n]` | Fixed-look width (default 10, range 4–40) |
 | `/pacman message …` | Lock custom working text (empty = auto-random) |
 | `/pacman off` | Hide indicator |
 
@@ -65,7 +67,7 @@ Full reference: [docs/usage/commands.md](../../docs/usage/commands.md).
 |------|--------|
 | `classic` | Full-width pellet run (default) |
 | `chase` | Full-width Blinky hunt → power pellet → revenge |
-| `mini` / `arcade` / `fruit` | 7-cell animations (**in rotate**) |
+| `mini` / `arcade` / `fruit` | Fixed-width animations (**in rotate**); width via `cells` config |
 
 Details: [docs/usage/looks.md](../../docs/usage/looks.md). Persistence: [docs/usage/persistence.md](../../docs/usage/persistence.md).
 

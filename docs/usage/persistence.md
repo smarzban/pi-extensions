@@ -18,6 +18,7 @@ Resolved via pi’s `getAgentDir()` (normally `~/.pi/agent`).
 | `rotate` | boolean | Cycle looks each message |
 | `rotateIndex` | number | Next index in the rotate list |
 | `customMessage` | string? | Override for the working message |
+| `cells` | number? | Fixed strip width for mini/arcade/fruit (default 10, clamped 4–40) |
 
 Example:
 
@@ -26,7 +27,8 @@ Example:
 	"mode": "chase",
 	"rotate": false,
 	"rotateIndex": 2,
-	"customMessage": "nom nom..."
+	"customMessage": "nom nom...",
+	"cells": 10
 }
 ```
 
