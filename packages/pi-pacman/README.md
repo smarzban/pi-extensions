@@ -1,68 +1,46 @@
-# pi-pacman
+# @pi-extensions/pi-pacman
 
-Pac-Man working indicator for [pi](https://github.com/earendil-works/pi).
+Pac-Man **working indicator** for [pi](https://github.com/earendil-works/pi) — replaces the streaming spinner with pellet runs, ghost chases, arcade tunnels, and fruit bonuses.
 
-Replaces the streaming spinner with pellet runs, ghost chases, arcade tunnels, and fruit bonuses.
+Part of the [pi-extensions](https://github.com/smarzban/pi-extensions) monorepo.
 
 ## Install
 
 ```bash
-# from npm (after publish)
 pi install npm:@pi-extensions/pi-pacman
-
-# local path (this monorepo)
-pi install /absolute/path/to/pi-extensions/packages/pi-pacman
 ```
 
-### Publish to npm
+Other methods (git / local): [docs/install](../../docs/install/README.md).
 
-Releases are **tag-driven** (OIDC trusted publishing) — see [docs/releases.md](../../docs/releases.md).
+## Quick use
 
-```bash
-# after version bump on main:
-git tag v0.1.0 && git push origin v0.1.0
+Restart pi, send a message, then:
+
+```text
+/pacman list
+/pacman chase
+/pacman rotate
 ```
 
-One-time: reservation publish with OTP + Trusted Publisher on npmjs.com (same doc).
+Full guides:
 
-Then anyone can:
+- [Quickstart](../../docs/quickstart.md)
+- [Commands](../../docs/usage/commands.md)
+- [Looks](../../docs/usage/looks.md)
+- [Persistence](../../docs/usage/persistence.md)
 
-```bash
-pi install npm:@pi-extensions/pi-pacman
-pi install npm:@pi-extensions/pi-pacman@0.1.0
-```
+## Looks (summary)
 
-## Commands
-
-| Command | Effect |
-|---------|--------|
-| `/pacman` | Show current look |
-| `/pacman list` | Catalog of looks |
-| `/pacman <look>` | Lock to that look (stops rotate) |
-| `/pacman rotate` | Cycle a different look every message |
-| `/pacman off` | Hide the indicator (stops rotate) |
-| `/pacman message <text>` | Custom working message |
-| `/pacman message` | Reset message to look default |
-| `/pacman clear` | Hide the look list widget |
-
-### Looks
-
-| Look | Vibe |
-|------|------|
+| Look | Notes |
+|------|--------|
 | `classic` | Full-width pellet run (default) |
 | `chase` | Full-width Blinky hunt → revenge |
-| `mini` | 7-cell pellet run |
-| `arcade` | 7-cell maze tunnel |
-| `fruit` | 7-cell cherry bonus |
+| `mini` / `arcade` / `fruit` | 7-cell animations |
 
-Speeds: full-width **80ms**/frame · fixed **110ms**/frame.
+## Release
 
-## Persistence
+Maintainers: [docs/releases.md](../../docs/releases.md).
 
-Look, rotate on/off, rotate index, and custom message save to `~/.pi/agent/pacman-thinking.json`.
+## License
 
-## One-shot (without install)
-
-```bash
-pi --extension ./index.ts
-```
+[MIT](LICENSE)

@@ -1,0 +1,26 @@
+# pi-extensions
+
+> Monorepo of pi (terminal coding agent) extensions. npm org @pi-extensions. Primary package: Pac-Man working/thinking indicator.
+
+## Docs
+
+- [Documentation index](docs/README.md)
+- [Quickstart](docs/quickstart.md)
+- [Install](docs/install/README.md)
+- [Commands](docs/usage/commands.md)
+- [Looks](docs/usage/looks.md)
+- [Persistence](docs/usage/persistence.md)
+- [Development](docs/development.md)
+- [Releases](docs/releases.md)
+- [Architecture overview](docs/architecture.md)
+
+## Packages
+
+- [pi-pacman](packages/pi-pacman/README.md) — npm `@pi-extensions/pi-pacman`
+
+## Project
+
+- [Root README](README.md)
+- [Contributing](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
+- [Security](SECURITY.md)
