@@ -34,7 +34,7 @@ Each package has its own `package.json` with `"pi": { "extensions": [...] }` dec
 - Test: per-package if present (none yet for pi-pacman)
 - Canonical verify: `cd packages/pi-pacman && npm pack --dry-run`
 - Install local package into pi: `pi install /absolute/path/to/pi-extentions/packages/pi-<name>`
-- Publish a package: `cd packages/pi-<name> && npm publish --access public`
+- Publish: bump version on `main`, tag `vX.Y.Z` matching `package.json`, push tag → `.github/workflows/release.yml` (OIDC). See [docs/releases.md](docs/releases.md).
 
 ## Conventions
 

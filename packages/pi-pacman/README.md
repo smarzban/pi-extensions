@@ -16,17 +16,19 @@ pi install /absolute/path/to/pi-extentions/packages/pi-pacman
 
 ### Publish to npm
 
+Releases are **tag-driven** (OIDC trusted publishing) — see [docs/releases.md](../../docs/releases.md).
+
 ```bash
-cd packages/pi-pacman
-npm login          # once
-npm publish --access public
+# after version bump on main:
+git tag v0.1.0 && git push origin v0.1.0
 ```
+
+One-time: reservation publish with OTP + Trusted Publisher on npmjs.com (same doc).
 
 Then anyone can:
 
 ```bash
 pi install npm:pi-pacman
-# or pin a version
 pi install npm:pi-pacman@0.1.0
 ```
 

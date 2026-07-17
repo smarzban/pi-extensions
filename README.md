@@ -21,10 +21,11 @@ pi install /absolute/path/to/pi-extentions/packages/pi-pacman
 
 ### Publish a package
 
+Tag-driven OIDC release (no long-lived npm token). Full steps: [docs/releases.md](docs/releases.md).
+
 ```bash
-cd packages/pi-pacman
-npm login
-npm publish --access public
+# bump packages/pi-pacman/package.json version, commit to main, then:
+git tag v0.1.0 && git push origin v0.1.0
 ```
 
 See each package's README for setup and usage.

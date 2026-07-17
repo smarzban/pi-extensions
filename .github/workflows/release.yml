@@ -1,0 +1,81 @@
+# Release: publish pi-pacman to npm on a version tag, via OIDC trusted publishing.
+#
+# ARMED BUT UNFIRED until BOTH one-time maintainer steps are done (see docs/releases.md):
+#   1. Publish a reservation version of `pi-pacman` once with OTP so the package name exists
+#      (trusted publishers can only be linked to packages that already exist).
+#   2. On npmjs.com → pi-pacman → Settings → Trusted Publisher:
+#        Organization/user: smarzban
+#        Repository:        pi-extentions
+#        Workflow filename: release.yml
+#        Environment:       (leave empty)
+#      THEN this workflow publishes token-lessly.
+#
+# NO npm token lives here. Trusted publishing exchanges a short-lived GitHub OIDC token
+# (id-token: write) for publish rights; provenance is automatic on public repos.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write # OIDC for npm trusted publishing + provenance
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-pi-pacman:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/pi-pacman
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # SECURITY: run before any install from the checked-out tree. Tag pushes use the
+      # workflow file FROM the tagged commit — tag protection on v* is still the primary control.
+      - name: Verify the tagged commit is on main
+        working-directory: .
+        run: |
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::tag $GITHUB_REF_NAME points at $GITHUB_SHA, not on origin/main — refusing to publish an unreviewed commit"
+            exit 1
+          fi
+          echo "$GITHUB_SHA is on origin/main — proceeding"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      # OIDC trusted publishing needs npm >= 11.5.1. Pin it — do not float npm@latest in a
+      # job that holds id-token:write + publish rights.
+      - name: Pin npm for OIDC publish
+        working-directory: .
+        run: npm install -g npm@11.5.1
+
+      - name: Verify tag matches package.json version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          NAME="$(node -p "require('./package.json').name")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag v$TAG does not match $NAME package.json version $PKG"
+            exit 1
+          fi
+          echo "publishing $NAME@$PKG (tag $GITHUB_REF_NAME)"
+
+      - name: Pack dry-run (green bar)
+        run: npm pack --dry-run
+
+      # Provenance is automatic under trusted publishing for public repos; disable when private
+      # (npm rejects provenance from private sources).
+      - name: Publish to npm
+        run: npm publish --provenance=${{ !github.event.repository.private }}
