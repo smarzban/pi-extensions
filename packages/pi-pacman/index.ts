@@ -33,7 +33,6 @@ const PELLET = "\x1b[38;2;255;184;174m";
 const POWER = "\x1b[38;2;255;184;255m";
 const WALL = "\x1b[38;2;33;33;255m";
 const CHERRY = "\x1b[38;2;255;0;0m";
-const SCORE = "\x1b[38;2;255;255;255m";
 const GHOSTS = {
 	blinky: "\x1b[38;2;255;0;0m",
 	scared: "\x1b[38;2;33;33;255m",
@@ -41,8 +40,12 @@ const GHOSTS = {
 
 /** Full-width looks (classic / chase) — snappier chomp. */
 const FRAME_MS_FULL = 80;
-/** Fixed 7-cell looks (mini / arcade / fruit) — a bit slower. */
+/** Fixed-width looks (mini / arcade / fruit) — a bit slower. */
 const FRAME_MS_FIXED = 110;
+/** Default strip length for mini / arcade / fruit (cells). Overridable via config. */
+const DEFAULT_CELLS = 10;
+const CELLS_MIN = 4;
+const CELLS_MAX = 40;
 
 type Facing = "right" | "left";
 
@@ -127,8 +130,10 @@ function runTrack(track: number): string[] {
 
 // ── looks ────────────────────────────────────────────────────────────
 
-/** Fixed strip length for mini / arcade / fruit (cells). */
-const FIXED_CELLS = 7;
+function clampCells(n: number): number {
+	if (!Number.isFinite(n)) return DEFAULT_CELLS;
+	return Math.max(CELLS_MIN, Math.min(CELLS_MAX, Math.round(n)));
+}
 
 const LOOKS: Look[] = [
 	{
@@ -193,16 +198,16 @@ const LOOKS: Look[] = [
 	},
 	{
 		id: "mini",
-		blurb: "7-cell pellet run",
+		blurb: "fixed-width pellet run",
 		message: "chomp chomp...",
-		frames: () => runTrack(FIXED_CELLS),
+		frames: (track) => runTrack(track),
 	},
 	{
 		id: "arcade",
-		blurb: "7-cell maze tunnel with blue walls",
+		blurb: "fixed-width maze tunnel with blue walls",
 		message: "insert coin...",
-		frames: () => {
-			const last = FIXED_CELLS - 1;
+		frames: (track) => {
+			const last = track - 1;
 			const frames: string[] = [];
 			const wall = paint(WALL, "│");
 			for (let i = 0; i <= last; i++) {
@@ -216,7 +221,7 @@ const LOOKS: Look[] = [
 					frames.push(`${wall}${mid}${wall}`);
 				}
 			}
-			frames.push(`${wall}${paint(WALL, "≈".repeat(FIXED_CELLS))}${wall}`);
+			frames.push(`${wall}${paint(WALL, "≈".repeat(track))}${wall}`);
 			for (let i = last; i >= 0; i--) {
 				for (const open of [true, false]) {
 					let mid = "";
@@ -233,10 +238,10 @@ const LOOKS: Look[] = [
 	},
 	{
 		id: "fruit",
-		blurb: "7-cell cherry bonus run",
+		blurb: "fixed-width cherry bonus run",
 		message: "fruit bonus...",
-		frames: () => {
-			const last = FIXED_CELLS - 1;
+		frames: (track) => {
+			const last = track - 1;
 			const frames: string[] = [];
 
 			// Rightward: cherry waits at the far end
@@ -253,8 +258,6 @@ const LOOKS: Look[] = [
 					frames.push(row);
 				}
 			}
-			frames.push(`${" ".repeat(Math.max(0, FIXED_CELLS - 3))}${paint(SCORE, "100")}`);
-			frames.push(`${" ".repeat(Math.max(0, FIXED_CELLS - 3))}${paint(SCORE, "100")}`);
 
 			// Leftward: cherry waits at the start
 			for (let i = last; i >= 0; i--) {
@@ -270,8 +273,6 @@ const LOOKS: Look[] = [
 					frames.push(row);
 				}
 			}
-			frames.push(`${paint(SCORE, "300")}${" ".repeat(Math.max(0, FIXED_CELLS - 3))}`);
-			frames.push(`${paint(SCORE, "300")}${" ".repeat(Math.max(0, FIXED_CELLS - 3))}`);
 			return frames;
 		},
 	},
@@ -330,6 +331,8 @@ interface PersistedState {
 	rotate?: boolean;
 	rotateIndex?: number;
 	customMessage?: string;
+	/** Fixed strip length for mini / arcade / fruit (cells). Default 10. */
+	cells?: number;
 }
 
 function statePath(): string {
@@ -356,16 +359,20 @@ function saveState(state: PersistedState): void {
 	}
 }
 
-function resolveTrack(look: Look, message: string): number {
+function resolveTrack(look: Look, message: string, cells: number): number {
 	if (look.fullWidth) return indicatorWidth(message);
-	return FIXED_CELLS;
+	return cells;
 }
 
-function getIndicator(mode: Mode, message: string): WorkingIndicatorOptions | undefined {
+function getIndicator(
+	mode: Mode,
+	message: string,
+	cells: number,
+): WorkingIndicatorOptions | undefined {
 	if (mode === "off") return { frames: [] };
 	const look = LOOK_BY_ID.get(mode);
 	if (!look) return undefined;
-	const track = resolveTrack(look, message);
+	const track = resolveTrack(look, message, cells);
 	const intervalMs = look.fullWidth ? FRAME_MS_FULL : FRAME_MS_FIXED;
 	return { frames: look.frames(track), intervalMs };
 }
@@ -421,6 +428,8 @@ export default function (pi: ExtensionAPI) {
 		typeof saved.customMessage === "string" && saved.customMessage.length > 0
 			? saved.customMessage
 			: undefined;
+	let cells =
+		typeof saved.cells === "number" ? clampCells(saved.cells) : DEFAULT_CELLS;
 	/** Last auto-picked blurb (not persisted); used to avoid immediate repeats. */
 	let autoMessage: string = pickRandomMessage();
 	let lastUi: ExtensionUIContext | undefined;
@@ -431,6 +440,7 @@ export default function (pi: ExtensionAPI) {
 			rotate,
 			rotateIndex,
 			customMessage,
+			cells,
 		});
 	};
 
@@ -453,7 +463,7 @@ export default function (pi: ExtensionAPI) {
 	const apply = (ctx: ExtensionContext) => {
 		lastUi = ctx.ui;
 		const message = workingMessage();
-		ctx.ui.setWorkingIndicator(getIndicator(mode, message));
+		ctx.ui.setWorkingIndicator(getIndicator(mode, message, cells));
 		ctx.ui.setWorkingMessage(message);
 		ctx.ui.setStatus("pacman-thinking", ctx.ui.theme.fg("dim", statusLabel()));
 		persist();
@@ -470,7 +480,7 @@ export default function (pi: ExtensionAPI) {
 	const reapplyIfFullWidth = () => {
 		if (!lastUi || !isFullWidthMode()) return;
 		const message = workingMessage();
-		lastUi.setWorkingIndicator(getIndicator(mode, message));
+		lastUi.setWorkingIndicator(getIndicator(mode, message, cells));
 	};
 
 	process.stdout.on?.("resize", reapplyIfFullWidth);
@@ -502,12 +512,12 @@ export default function (pi: ExtensionAPI) {
 				const extra = isFullWidthMode()
 					? ` · width ${indicatorWidth(msg)} cells`
 					: LOOK_BY_ID.has(mode)
-						? ` · width ${FIXED_CELLS} cells`
+						? ` · width ${cells} cells`
 						: "";
 				const rotInfo = rotate ? " · rotate on (short looks)" : "";
 				const msgMode = customMessage ? "custom" : "auto";
 				ctx.ui.notify(
-					`Pac-Man: ${describeMode(mode)}${rotInfo} · message (${msgMode}): "${msg}"${extra}`,
+					`Pac-Man: ${describeMode(mode)}${rotInfo} · cells ${cells} · message (${msgMode}): "${msg}"${extra}`,
 					"info",
 				);
 				return;
@@ -542,6 +552,26 @@ export default function (pi: ExtensionAPI) {
 						: `Working message is auto again (now: "${autoMessage}")`,
 					"info",
 				);
+				return;
+			}
+
+			if (head === "cells" || head === "width") {
+				const rawN = rest[0]?.trim();
+				if (!rawN) {
+					ctx.ui.notify(
+						`Pac-Man cells: ${cells} (default ${DEFAULT_CELLS}, range ${CELLS_MIN}–${CELLS_MAX}). Set with /pacman cells <n> or in ~/.pi/agent/pacman-thinking.json`,
+						"info",
+					);
+					return;
+				}
+				const n = Number(rawN);
+				if (!Number.isFinite(n)) {
+					ctx.ui.notify(`Invalid cells "${rawN}". Use a number ${CELLS_MIN}–${CELLS_MAX}.`, "error");
+					return;
+				}
+				cells = clampCells(n);
+				apply(ctx);
+				ctx.ui.notify(`Pac-Man short-look width: ${cells} cells`, "info");
 				return;
 			}
 

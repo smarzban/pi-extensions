@@ -8,9 +8,9 @@ A **look** is a named animation for pi’s streaming working indicator.
 |------|-------|-------|-----------------|-------------|
 | **classic** | Full terminal (minus message) | 80 ms/frame | `waka waka...` | Pac-Man eats pellets left→right, then turns |
 | **chase** | Full terminal | 80 ms/frame | `run from blinky...` | Red Blinky chases from behind → power pellet → blue scared ghost |
-| **mini** | 7 cells | 110 ms/frame | `chomp chomp...` | Short pellet run |
-| **arcade** | 7 cells + wall glyphs | 110 ms/frame | `insert coin...` | Blue `│` corridor + warp flash |
-| **fruit** | 7 cells | 110 ms/frame | `fruit bonus...` | Cherry bonus + `100` / `300` pops |
+| **mini** | fixed cells (default 10) | 110 ms/frame | `chomp chomp...` | Short pellet run |
+| **arcade** | fixed cells + wall glyphs | 110 ms/frame | `insert coin...` | Blue `│` corridor + warp flash |
+| **fruit** | fixed cells | 110 ms/frame | `fruit bonus...` | Cherry bonus run (no score pop) |
 
 Default on first run: **classic**.
 
@@ -40,7 +40,7 @@ They rebuild:
 - on terminal **resize**
 - on each **agent turn** when that look is active
 
-Fixed looks always use **7** cells (`FIXED_CELLS`).
+Fixed looks use **`cells`** from config (default **10**, range 4–40). Set via `/pacman cells <n>` or `cells` in `~/.pi/agent/pacman-thinking.json`.
 
 ## Frame rates
 
