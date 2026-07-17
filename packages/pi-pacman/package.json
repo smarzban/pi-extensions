@@ -14,13 +14,13 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/smarzban/pi-extentions.git",
+		"url": "git+https://github.com/smarzban/pi-extensions.git",
 		"directory": "packages/pi-pacman"
 	},
 	"bugs": {
-		"url": "https://github.com/smarzban/pi-extentions/issues"
+		"url": "https://github.com/smarzban/pi-extensions/issues"
 	},
-	"homepage": "https://github.com/smarzban/pi-extentions/tree/main/packages/pi-pacman#readme",
+	"homepage": "https://github.com/smarzban/pi-extensions/tree/main/packages/pi-pacman#readme",
 	"engines": {
 		"node": ">=18.0.0"
 	},

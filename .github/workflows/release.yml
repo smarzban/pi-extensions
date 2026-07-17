@@ -5,7 +5,7 @@
 #      package exists under the pi-extensions npm org (trusted publishers need an existing package).
 #   2. On npmjs.com → @pi-extensions/pi-pacman → Settings → Trusted Publisher:
 #        Organization/user: smarzban
-#        Repository:        pi-extentions
+#        Repository:        pi-extensions
 #        Workflow filename: release.yml
 #        Environment:       (leave empty)
 #      THEN this workflow publishes token-lessly.

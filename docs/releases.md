@@ -11,7 +11,7 @@ No long-lived npm token in the repo.
 npm only lets you attach a Trusted Publisher to a package that **already exists**.
 
 With **passkey** 2FA (no 6-digit OTP), use a granular access token that can publish to the
-`pi-extentions` org and has **Bypass two-factor authentication** enabled:
+`pi-extensions` org and has **Bypass two-factor authentication** enabled:
 
 ```bash
 npm config set //registry.npmjs.org/:_authToken=npm_YOUR_TOKEN
@@ -33,7 +33,7 @@ npm publish --access public --otp=XXXXXX   # 6 digits only, not npm_…
 1. Open https://www.npmjs.com/package/@pi-extensions/pi-pacman → **Settings** → **Trusted Publisher**
 2. Add GitHub Actions:
    - **Organization or user:** `smarzban`
-   - **Repository:** `pi-extentions`
+   - **Repository:** `pi-extensions`
    - **Workflow filename:** `release.yml` (exact; not a path)
    - **Environment:** leave empty
 3. Save
@@ -78,6 +78,6 @@ File: [`.github/workflows/release.yml`](../.github/workflows/release.yml)
 
 ```bash
 pi install npm:@pi-extensions/pi-pacman
-pi install git:github.com/smarzban/pi-extentions
-pi install /path/to/pi-extentions/packages/pi-pacman
+pi install git:github.com/smarzban/pi-extensions
+pi install /path/to/pi-extensions/packages/pi-pacman
 ```

@@ -11,7 +11,7 @@ Replaces the streaming spinner with pellet runs, ghost chases, arcade tunnels, a
 pi install npm:@pi-extensions/pi-pacman
 
 # local path (this monorepo)
-pi install /absolute/path/to/pi-extentions/packages/pi-pacman
+pi install /absolute/path/to/pi-extensions/packages/pi-pacman
 ```
 
 ### Publish to npm

@@ -4,7 +4,7 @@
  * Replaces pi's streaming working indicator with a Pac-Man animation.
  *
  * Install:
- *   pi install /path/to/pi-extentions/packages/pi-pacman
+ *   pi install /path/to/pi-extensions/packages/pi-pacman
  *   pi --extension ./index.ts
  *
  * Commands:

@@ -1,4 +1,4 @@
-# pi-extentions
+# pi-extensions
 
 Extensions for [pi](https://github.com/earendil-works/pi), the terminal-based coding agent.
 
@@ -13,10 +13,10 @@ Extensions for [pi](https://github.com/earendil-works/pi), the terminal-based co
 pi install npm:@pi-extensions/pi-pacman
 
 # from this git repo (package path)
-pi install git:github.com/smarzban/pi-extentions
+pi install git:github.com/smarzban/pi-extensions
 
 # local path (this monorepo)
-pi install /absolute/path/to/pi-extentions/packages/pi-pacman
+pi install /absolute/path/to/pi-extensions/packages/pi-pacman
 ```
 
 ### Publish a package
@@ -33,7 +33,7 @@ See each package's README for setup and usage.
 ## Structure
 
 ```
-pi-extentions/
+pi-extensions/
 ├── package.json              # private workspaces monorepo
 ├── AGENTS.md
 ├── LICENSE
