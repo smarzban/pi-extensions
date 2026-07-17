@@ -1,6 +1,6 @@
 # pi-extensions
 
-> Monorepo of pi (terminal coding agent) extensions. npm org @pi-extensions. Primary package: Pac-Man working/thinking indicator.
+> Monorepo of pi (terminal coding agent) extensions. npm org @pi-extensions. Each package under packages/ is independently installable.
 
 ## Docs
 

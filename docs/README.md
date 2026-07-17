@@ -1,6 +1,6 @@
 # Documentation
 
-**pi-extensions** is a monorepo of [pi](https://github.com/earendil-works/pi) packages. The first package is **pi-pacman** — a Pac-Man animation that replaces pi’s streaming working indicator.
+**pi-extensions** is a monorepo of [pi](https://github.com/earendil-works/pi) packages under the npm org `@pi-extensions`. Package-specific install and usage live in each package README (e.g. [pi-pacman](../packages/pi-pacman/README.md)); this tree holds shared install, release, and development docs plus the current package’s usage guides.
 
 ## Who starts where
 
@@ -32,4 +32,4 @@ docs/
     └── persistence.md
 ```
 
-Package-local READMEs (e.g. [packages/pi-pacman/README.md](../packages/pi-pacman/README.md)) stay short and link here.
+Package-local READMEs (e.g. [packages/pi-pacman/README.md](../packages/pi-pacman/README.md)) lead with install/quickstart for that extension and link here for full guides.
