@@ -43,7 +43,7 @@ session_shutdown ─────────► drop resize listener
 session_start ──► applyEditor (rounded box + bottom-right session name)
               └─► applyFooter  (model·effort, ctx, cost, git/PR)
 
-turn_end / branch change ──► refresh git (+ PR via gh)
+turn_end / branch change ──► refresh git + debounced open-PR lookup via gh
 /statusline usage on      ──► (opt-in) read auth + fetch provider quota, refresh every 5m
 ```
 
@@ -51,7 +51,7 @@ turn_end / branch change ──► refresh git (+ PR via gh)
 |-------|------|
 | **Editor border** | `CustomEditor` subclass draws a rounded box, `›` prompt, and bottom-right session name |
 | **Footer** | `setFooter` renders `[model·effort] [ctx] [$cost] [usage] [git] [#pr]` |
-| **Git/PR** | `git status --porcelain=v2` + `gh pr view`, refreshed on turn end / branch change |
+| **Git/PR** | `git status --porcelain=v2` + debounced `gh pr view --json number,state`; only open PRs are shown |
 | **Provider usage** | **Opt-in, off by default**: reads auth + calls provider API; Codex only |
 | **State file** | `~/.pi/agent/statusline.json` (`enabled`, `usageEnabled`) via `getAgentDir()` |
 

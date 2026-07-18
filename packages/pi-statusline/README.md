@@ -12,7 +12,7 @@ Part of the [pi-extensions](https://github.com/smarzban/pi-extensions) monorepo.
 - **Context** as `ctx N% · used/total`: green below 50%, yellow at 50%+, red at 70%+
 - **Session cost** `$x.xxx` from assistant `usage.cost.total` when non-zero
 - **Provider remaining** for **openai-codex**, **opt-in, off by default** (see [Provider usage](#provider-usage))
-- **Git** `⎇ branch +staged *unstaged ?untracked` plus ahead/behind; **PR** via `gh` when present
+- **Git** `⎇ branch +staged *unstaged ?untracked` plus ahead/behind; **open PR** via `gh` when present
 - **Local by default** with no network calls or token reads unless you enable provider usage
 
 ## Quickstart
@@ -39,6 +39,8 @@ Example (default, no provider-usage segment until you opt in):
 ```
 
 After `/statusline usage on`, a Codex quota segment appears: `[5h 80% rem · 4h]`.
+
+The current branch's open PR is checked on startup, branch changes, `/statusline refresh`, and at most once every 30 seconds after an agent run. Merged or closed PRs disappear automatically after the next check.
 
 ## Commands
 

@@ -16,6 +16,7 @@ Each package is versioned and released independently under `packages/<name>`, vi
 - Redesign the editor as a rounded text box with a `›` prompt.
 - Move the session name to the editor's bottom-right border.
 - Keep model/effort and the remaining runtime statistics in the footer.
+- Refresh the current branch's open PR after agent runs with a 30-second debounce, hiding merged or closed PRs.
 
 ## pi-statusline 0.1.1 (2026-07-18)
 

@@ -59,6 +59,7 @@ interface GitState {
 // ── constants ────────────────────────────────────────────────────────
 
 const USAGE_REFRESH_MS = 5 * 60_000;
+const PR_REFRESH_MS = 30_000;
 const STATUS_KEY = "statusline";
 
 // ── persisted settings ───────────────────────────────────────────────
@@ -370,7 +371,7 @@ function readPrNumber(cwd: string): number | null {
 	try {
 		const out = execFileSync(
 			"gh",
-			["pr", "view", "--json", "number", "-q", ".number"],
+			["pr", "view", "--json", "number,state"],
 			{
 				cwd,
 				encoding: "utf8",
@@ -378,7 +379,9 @@ function readPrNumber(cwd: string): number | null {
 				stdio: ["pipe", "pipe", "pipe"],
 			},
 		).trim();
-		const n = parseInt(out, 10);
+		const data = JSON.parse(out) as { number?: unknown; state?: unknown };
+		if (data.state !== "OPEN") return null;
+		const n = Number(data.number);
 		return Number.isFinite(n) ? n : null;
 	} catch {
 		return null;
@@ -449,8 +452,10 @@ export default function (pi: ExtensionAPI) {
 	let sessionName: string | undefined;
 	let git: GitState | null = null;
 	let prNumber: number | null = null;
-	/** Branch that `prNumber` was resolved for, so we don't re-run `gh` when it hasn't changed. */
+	/** Branch that `prNumber` was resolved for. */
 	let prBranch: string | null = null;
+	/** Last PR lookup, used to debounce the per-turn refresh. */
+	let lastPrLookupAt = 0;
 	let latestUsage: UsageSnapshot | null = null;
 	let activeUsageKey: string | null = null;
 	let refreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -505,14 +510,17 @@ export default function (pi: ExtensionAPI) {
 		tuiRef?.requestRender();
 	};
 
-	// The PR lookup spawns `gh pr view` (a GitHub API round-trip). Only run it when the branch
-	// changed (PR can only differ then) or on an explicit refresh, not on every turn. Caches by
-	// branch so a no-op branch event doesn't re-hit the API.
+	// PR lookup spawns `gh pr view` (a GitHub API round-trip). Check on turns, but debounce
+	// lookups so normal rapid-fire turns do not create a request for every turn. Branch changes
+	// and explicit refreshes always bypass the debounce. Closed/merged PRs return null and clear
+	// the segment.
 	const refreshPr = (cwd: string, force = false) => {
 		const branch = git?.branch ?? null;
-		if (!force && branch === prBranch) return;
+		const branchChanged = branch !== prBranch;
+		if (!force && !branchChanged && Date.now() - lastPrLookupAt < PR_REFRESH_MS) return;
 		prBranch = branch;
-		prNumber = readPrNumber(cwd);
+		lastPrLookupAt = Date.now();
+		prNumber = branch ? readPrNumber(cwd) : null;
 		tuiRef?.requestRender();
 	};
 
@@ -630,7 +638,7 @@ export default function (pi: ExtensionAPI) {
 			gitSeg = bracket(theme, g);
 		}
 
-		// PR only when `gh pr view` finds one for the current branch
+		// Open PR only; merged and closed PRs are omitted.
 		const prSeg =
 			prNumber != null ? bracket(theme, theme.fg("accent", `#${prNumber}`)) : "";
 
@@ -798,8 +806,8 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("turn_end", async (_event, ctx) => {
-		// Cheap local git only. The PR lookup is left to branch change / manual refresh.
 		refreshGit(ctx.cwd);
+		refreshPr(ctx.cwd);
 	});
 
 	// ── command ──────────────────────────────────────────────────────
