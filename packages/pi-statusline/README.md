@@ -73,11 +73,13 @@ Yes, pi exposes per-assistant-message `usage.cost.total` (USD estimate from mode
 
 ## Install methods
 
-| Method | Command |
-|--------|---------|
-| **npm** | `pi install npm:@pi-extensions/pi-statusline` |
-| **git** | `pi install git:github.com/smarzban/pi-extensions` |
-| **local** | `pi install /absolute/path/to/pi-extensions/packages/pi-statusline` |
+| Method | Loads | Command |
+|--------|-------|---------|
+| **npm** (recommended) | This package only | `pi install npm:@pi-extensions/pi-statusline` |
+| **local** | This package only | `pi install /absolute/path/to/pi-extensions/packages/pi-statusline` |
+| **git** (whole monorepo) | All packages in the repo | `pi install git:github.com/smarzban/pi-extensions` |
+
+See [docs/install](../../docs/install/README.md) for one package vs whole monorepo.
 
 ## License
 

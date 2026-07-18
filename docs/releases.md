@@ -95,8 +95,11 @@ File: [`.github/workflows/release.yml`](../.github/workflows/release.yml)
 ## Install options (users)
 
 ```bash
+# One package (usual)
 pi install npm:@pi-extensions/pi-pacman
 pi install npm:@pi-extensions/pi-statusline
-pi install git:github.com/smarzban/pi-extensions      # whole monorepo
-pi install /path/to/pi-extensions/packages/pi-pacman  # local path
+pi install /path/to/pi-extensions/packages/pi-pacman
+
+# Whole monorepo (every package in root pi.extensions)
+pi install git:github.com/smarzban/pi-extensions
 ```

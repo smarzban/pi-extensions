@@ -30,13 +30,13 @@ The indicator only appears while the agent is **streaming a normal response**, n
 
 ## Install
 
-| Method | Command |
-|--------|---------|
-| **npm** (recommended) | `pi install npm:@pi-extensions/pi-pacman` |
-| **git** (whole monorepo) | `pi install git:github.com/smarzban/pi-extensions` |
-| **local path** | `pi install /absolute/path/to/pi-extensions/packages/pi-pacman` |
+| Method | Loads | Command |
+|--------|-------|---------|
+| **npm** (recommended) | This package only | `pi install npm:@pi-extensions/pi-pacman` |
+| **local path** | This package only | `pi install /absolute/path/to/pi-extensions/packages/pi-pacman` |
+| **git** (whole monorepo) | All packages in the repo | `pi install git:github.com/smarzban/pi-extensions` |
 
-More detail: [docs/install](../../docs/install/README.md).
+More detail: [docs/install](../../docs/install/README.md) (one package vs whole monorepo).
 
 ## Usage
 
