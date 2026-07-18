@@ -1,15 +1,15 @@
 # pi-extensions
 
-**Pi packages monorepo** — installable [pi](https://github.com/earendil-works/pi) coding-agent extensions, published under the npm org [`@pi-extensions`](https://www.npmjs.com/org/pi-extensions).
+**Pi packages monorepo**: installable [pi](https://github.com/earendil-works/pi) coding-agent extensions, published under the npm org [`@pi-extensions`](https://www.npmjs.com/org/pi-extensions).
 
 Each package under `packages/` is independent: its own `package.json`, entrypoint, README, and version. Install one package, the whole monorepo from git, or a local path.
 
 ## Highlights
 
-- **One extension per package** — no cross-package dependencies
-- **TypeScript, no build step** — pi loads sources via jiti
-- **npm org `@pi-extensions`** — scoped, public packages with `pi-package` keywords for gallery discoverability
-- **Tag-driven releases** — per-package `pi-<name>-vX.Y.Z` → GitHub Actions OIDC → npm
+- **One extension per package**: no cross-package dependencies
+- **TypeScript, no build step**: pi loads sources via jiti
+- **npm org `@pi-extensions`**: scoped, public packages with `pi-package` keywords for gallery discoverability
+- **Tag-driven releases**: per-package `pi-<name>-vX.Y.Z` → GitHub Actions OIDC → npm
 
 ## Packages
 

@@ -38,9 +38,9 @@ const GHOSTS = {
 	scared: "\x1b[38;2;33;33;255m",
 } as const;
 
-/** Full-width looks (classic / chase) — snappier chomp. */
+/** Full-width looks (classic / chase): snappier chomp. */
 const FRAME_MS_FULL = 80;
-/** Fixed-width looks (mini / arcade / fruit) — a bit slower. */
+/** Fixed-width looks (mini / arcade / fruit): a bit slower. */
 const FRAME_MS_FIXED = 110;
 /** Default strip length for mini / arcade / fruit (cells). Overridable via config. */
 const DEFAULT_CELLS = 10;
@@ -138,7 +138,7 @@ function clampCells(n: number): number {
 const LOOKS: Look[] = [
 	{
 		id: "classic",
-		blurb: "Full-width pellet run — dots span the terminal",
+		blurb: "Full-width pellet run, dots span the terminal",
 		message: "waka waka...",
 		fullWidth: true,
 		frames: (track) => runTrack(track),
@@ -279,7 +279,7 @@ const LOOKS: Look[] = [
 ];
 
 const LOOK_BY_ID = new Map(LOOKS.map((l) => [l.id, l]));
-/** Rotate only cycles short looks — full-width classic/chase stay opt-in via /pacman <look>. */
+/** Rotate only cycles short looks; full-width classic/chase stay opt-in via /pacman <look>. */
 const ROTATE_LOOKS = LOOKS.filter((l) => !l.fullWidth).map((l) => l.id);
 
 /** Fun working-line blurbs; one is picked at random each agent turn (unless custom message). */
@@ -326,7 +326,7 @@ type Mode = string;
 
 interface PersistedState {
 	mode?: string;
-	/** @deprecated old field — migrated to `rotate` */
+	/** @deprecated old field, migrated to `rotate` */
 	mix?: string;
 	rotate?: boolean;
 	rotateIndex?: number;
@@ -355,7 +355,7 @@ function saveState(state: PersistedState): void {
 		mkdirSync(dirname(path), { recursive: true });
 		writeFileSync(path, `${JSON.stringify(state, null, "\t")}\n`, "utf-8");
 	} catch {
-		// Non-fatal — indicator still works without persistence
+		// Non-fatal: indicator still works without persistence
 	}
 }
 
@@ -380,7 +380,7 @@ function getIndicator(
 function describeMode(mode: Mode): string {
 	if (mode === "off") return "hidden";
 	const look = LOOK_BY_ID.get(mode);
-	return look ? `${look.id} — ${look.blurb}` : mode;
+	return look ? `${look.id}: ${look.blurb}` : mode;
 }
 
 function pickRandomMessage(previous?: string): string {
@@ -486,7 +486,7 @@ export default function (pi: ExtensionAPI) {
 	process.stdout.on?.("resize", reapplyIfFullWidth);
 
 	pi.on("session_start", async (_event, ctx) => {
-		// Don't advance rotate here — agent_start picks per message.
+		// Don't advance rotate here; agent_start picks per message.
 		refreshAutoMessage();
 		apply(ctx);
 	});
@@ -589,7 +589,7 @@ export default function (pi: ExtensionAPI) {
 				refreshAutoMessage();
 				apply(ctx);
 				ctx.ui.notify(
-					`Pac-Man rotate on — short looks only: ${ROTATE_LOOKS.join(", ")} (now: ${mode}).`,
+					`Pac-Man rotate on. Short looks only: ${ROTATE_LOOKS.join(", ")} (now: ${mode}).`,
 					"info",
 				);
 				return;

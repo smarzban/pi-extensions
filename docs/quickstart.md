@@ -8,7 +8,7 @@ Fastest path to Pac-Man on pi’s working line.
 pi install npm:@pi-extensions/pi-pacman
 ```
 
-Requires [pi](https://github.com/earendil-works/pi) with interactive (TUI) mode. The indicator only appears while the agent is **streaming a normal response** — not during compaction/retry loaders.
+Requires [pi](https://github.com/earendil-works/pi) with interactive (TUI) mode. The indicator only appears while the agent is **streaming a normal response**, not during compaction/retry loaders.
 
 ## 2. Restart pi
 

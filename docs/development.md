@@ -35,7 +35,7 @@ Or a single package:
 cd packages/pi-pacman && npm pack --dry-run
 ```
 
-There is **no compile step** — pi loads TypeScript via jiti.
+There is **no compile step**: pi loads TypeScript via jiti.
 
 ## Load a local package into pi
 

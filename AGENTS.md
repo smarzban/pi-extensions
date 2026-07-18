@@ -7,11 +7,11 @@ no, it belongs in AGENTS.local.md.
 
 A gitignored AGENTS.local.md may exist beside this file; if present, read and follow it before starting work.
 
-Pointer files carry no content: edits go to AGENTS.md or AGENTS.local.md, never CLAUDE.md — it is a
+Pointer files carry no content: edits go to AGENTS.md or AGENTS.local.md, never CLAUDE.md, which is a
 frozen one-line pointer and says so in-file.
 
 Lazy creation: if an agent has private-routed content (per the litmus test above) and no
-AGENTS.local.md exists yet in this working copy, it creates one — the committed .gitignore entry
+AGENTS.local.md exists yet in this working copy, it creates one; the committed .gitignore entry
 already covers it, so the pattern self-propagates to every clone.
 
 @AGENTS.local.md
@@ -31,7 +31,7 @@ Each package has its own `package.json` with `"pi": { "extensions": [...] }` dec
 
 ## Build / test / verify
 
-- Build: none — extensions are TypeScript loaded by pi via jiti (no compile step)
+- Build: none; extensions are TypeScript loaded by pi via jiti (no compile step)
 - Test: per-package if present (none yet in any package)
 - Canonical verify: `cd packages/pi-pacman && npm pack --dry-run` (same for each package under `packages/*`)
 - Install local package into pi: `pi install /absolute/path/to/pi-extensions/packages/pi-<name>`
@@ -40,7 +40,7 @@ Each package has its own `package.json` with `"pi": { "extensions": [...] }` dec
 ## Conventions
 
 - TypeScript, no build step
-- Each package is independent — no cross-package dependencies
+- Each package is independent, no cross-package dependencies
 - Package layout: `packages/pi-<name>/{package.json,index.ts,README.md,LICENSE}`
 - `"pi": { "extensions": ["./index.ts"] }` in each package's package.json
 - Keywords include `pi-package` for gallery discoverability

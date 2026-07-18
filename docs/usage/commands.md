@@ -47,7 +47,7 @@ See [looks.md](looks.md) for what each does.
 /pacman cycle
 ```
 
-Enables cycle mode: on each `agent_start` (each user message turn), the next **short** look is applied. Full-width looks (`classic`, `chase`) are **not** in the rotation — pick them explicitly with `/pacman classic` etc.
+Enables cycle mode: on each `agent_start` (each user message turn), the next **short** look is applied. Full-width looks (`classic`, `chase`) are **not** in the rotation; pick them explicitly with `/pacman classic` etc.
 
 Order:
 

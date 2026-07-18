@@ -1,5 +1,5 @@
 /**
- * pi-statusline — session name on the editor top border + stats footer
+ * pi-statusline: session name on the editor top border + stats footer
  *
  *   ─────────────── the-name ─
  *   text box
@@ -434,6 +434,8 @@ export default function (pi: ExtensionAPI) {
 	let sessionName: string | undefined;
 	let git: GitState | null = null;
 	let prNumber: number | null = null;
+	/** Branch that `prNumber` was resolved for, so we don't re-run `gh` when it hasn't changed. */
+	let prBranch: string | null = null;
 	let latestUsage: UsageSnapshot | null = null;
 	let activeUsageKey: string | null = null;
 	let refreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -482,8 +484,19 @@ export default function (pi: ExtensionAPI) {
 		return PROVIDER_MAP[provider] ?? null;
 	};
 
+	// Local git status is cheap: safe to run every turn.
 	const refreshGit = (cwd: string) => {
 		git = readGit(cwd);
+		tuiRef?.requestRender();
+	};
+
+	// The PR lookup spawns `gh pr view` (a GitHub API round-trip). Only run it when the branch
+	// changed (PR can only differ then) or on an explicit refresh, not on every turn. Caches by
+	// branch so a no-op branch event doesn't re-hit the API.
+	const refreshPr = (cwd: string, force = false) => {
+		const branch = git?.branch ?? null;
+		if (!force && branch === prBranch) return;
+		prBranch = branch;
 		prNumber = readPrNumber(cwd);
 		tuiRef?.requestRender();
 	};
@@ -531,7 +544,7 @@ export default function (pi: ExtensionAPI) {
 			: theme.fg("accent", modelId);
 		const modelSeg = bracket(theme, modelInner);
 
-		// context — color: default <50%, warning ≥50%, error ≥70%
+		// context color: default <50%, warning ≥50%, error ≥70%
 		const cu = ctx.getContextUsage?.();
 		const total = cu?.contextWindow ?? ctx.model?.contextWindow ?? 0;
 		const used = cu?.tokens ?? null;
@@ -543,7 +556,7 @@ export default function (pi: ExtensionAPI) {
 					: null;
 		const ctxColor =
 			pct == null ? "dim" : pct >= 70 ? "error" : pct >= 50 ? "warning" : "success";
-		let ctxInner = dim("ctx —");
+		let ctxInner = dim("ctx ?");
 		if (pct != null && used != null && total > 0) {
 			ctxInner =
 				theme.fg(ctxColor, `ctx ${pct}%`) +
@@ -570,7 +583,7 @@ export default function (pi: ExtensionAPI) {
 				? bracket(theme, dim(`$${totalCost.toFixed(3)}`))
 				: "";
 
-		// provider usage — Codex only (when windows available)
+		// provider usage: Codex only (when windows available)
 		const usageSegs: string[] = [];
 		if (latestUsage?.windows.length) {
 			for (const w of latestUsage.windows) {
@@ -668,9 +681,11 @@ export default function (pi: ExtensionAPI) {
 			tuiRef = tui;
 			const unsubBranch = footerData.onBranchChange(() => {
 				refreshGit(ctx.cwd);
+				refreshPr(ctx.cwd);
 			});
 
 			refreshGit(ctx.cwd);
+			refreshPr(ctx.cwd, true);
 			if (usageEnabled) {
 				const key = detectUsageKey(ctx.model?.provider);
 				if (key) {
@@ -738,6 +753,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("turn_end", async (_event, ctx) => {
+		// Cheap local git only. The PR lookup is left to branch change / manual refresh.
 		refreshGit(ctx.cwd);
 	});
 
@@ -757,8 +773,8 @@ export default function (pi: ExtensionAPI) {
 					`model=${ctx.model?.provider}/${ctx.model?.id ?? "?"}`,
 					`effort=${thinkingLevel}`,
 					`usage=${usageStr}`,
-					`branch=${git?.branch ?? "—"}`,
-					`pr=${prNumber ?? "—"}`,
+					`branch=${git?.branch ?? "none"}`,
+					`pr=${prNumber ?? "none"}`,
 				];
 				ctx.ui.notify(segs.join(" · "), "info");
 				return;
@@ -819,6 +835,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			if (cmd === "refresh") {
 				refreshGit(ctx.cwd);
+				refreshPr(ctx.cwd, true);
 				if (usageEnabled) {
 					const key = detectUsageKey(ctx.model?.provider);
 					if (key) pullUsage(key, true);

@@ -70,17 +70,17 @@ jobs:
         run: |
           git fetch --quiet origin main
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "::error::tag $GITHUB_REF_NAME points at $GITHUB_SHA, not on origin/main — refusing to publish an unreviewed commit"
+            echo "::error::tag $GITHUB_REF_NAME points at $GITHUB_SHA, not on origin/main, refusing to publish an unreviewed commit"
             exit 1
           fi
-          echo "$GITHUB_SHA is on origin/main — proceeding"
+          echo "$GITHUB_SHA is on origin/main, proceeding"
 
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
-      # OIDC trusted publishing needs npm >= 11.5.1. Pin it — do not float npm@latest in a
+      # OIDC trusted publishing needs npm >= 11.5.1. Pin it; do not float npm@latest in a
       # job that holds id-token:write + publish rights.
       - name: Pin npm for OIDC publish
         run: npm install -g npm@11.5.1

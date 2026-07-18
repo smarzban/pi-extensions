@@ -1,16 +1,16 @@
 # @pi-extensions/pi-statusline
 
-Custom **statusline** for [pi](https://github.com/earendil-works/pi) — session name on the **editor top border** (right side), plus a footer with model/effort, context, provider remaining, git branch, PR, and diff.
+Custom **statusline** for [pi](https://github.com/earendil-works/pi): session name on the **editor top border** (right side), plus a footer with model/effort, context, provider remaining, git branch, PR, and diff.
 
 Part of the [pi-extensions](https://github.com/smarzban/pi-extensions) monorepo.
 
 ## Highlights
 
-- **Session name on the text-box top border** — `──────── the-name ─` (right-aligned on the top edge)
+- **Session name on the text-box top border**: `──────── the-name ─` (right-aligned on the top edge)
 - **Model · effort** from the active model + thinking level
-- **Context** as `ctx N% · used/total` — green below 50%, yellow at 50%+, red at 70%+
+- **Context** as `ctx N% · used/total`: green below 50%, yellow at 50%+, red at 70%+
 - **Session cost** `$x.xxx` from assistant `usage.cost.total` when non-zero
-- **Provider remaining** for **openai-codex** — **opt-in, off by default** (see [Provider usage](#provider-usage))
+- **Provider remaining** for **openai-codex**, **opt-in, off by default** (see [Provider usage](#provider-usage))
 - **Git** `⎇ branch +staged *unstaged ?untracked` plus ahead/behind; **PR** via `gh` when present
 - **Local by default** with no network calls or token reads unless you enable provider usage
 
@@ -69,7 +69,7 @@ them even when usage is on.
 
 ## Costs
 
-Yes — pi exposes per-assistant-message `usage.cost.total` (USD estimate from model pricing). The footer sums those across the session and shows `$x.xxx` when non-zero. Subscription OAuth turns may still report a computed cost even when you are not billed per-token.
+Yes, pi exposes per-assistant-message `usage.cost.total` (USD estimate from model pricing). The footer sums those across the session and shows `$x.xxx` when non-zero. Subscription OAuth turns may still report a computed cost even when you are not billed per-token.
 
 ## Install methods
 
