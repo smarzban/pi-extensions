@@ -16,8 +16,8 @@
 
 ## Packages
 
-- [pi-pacman](packages/pi-pacman/README.md) — npm `@pi-extensions/pi-pacman`
-- [pi-statusline](packages/pi-statusline/README.md) — npm `@pi-extensions/pi-statusline`
+- [pi-pacman](packages/pi-pacman/README.md): npm `@pi-extensions/pi-pacman`
+- [pi-statusline](packages/pi-statusline/README.md): npm `@pi-extensions/pi-statusline`
 
 ## Project
 

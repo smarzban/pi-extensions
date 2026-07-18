@@ -15,7 +15,8 @@ git clone git@github.com:smarzban/pi-extensions.git
 cd pi-extensions
 ```
 
-No root `npm install` is required for pi-pacman (the package has no runtime `dependencies`; pi provides `@earendil-works/pi-coding-agent` at load time).
+No `npm install` is required (packages have no runtime `dependencies`; pi provides the
+`@earendil-works/*` peer packages at load time).
 
 ## Canonical verify
 
@@ -34,7 +35,7 @@ Or a single package:
 cd packages/pi-pacman && npm pack --dry-run
 ```
 
-There is **no compile step** — pi loads TypeScript via jiti.
+There is **no compile step**: pi loads TypeScript via jiti.
 
 ## Load a local package into pi
 
@@ -55,11 +56,14 @@ Restart the session after edits if the extension was already loaded (or use pi�
 
 1. Create `packages/pi-<name>/` with `package.json`, `index.ts`, `README.md`, `LICENSE`
 2. Set `"pi": { "extensions": ["./index.ts"] }`
-3. List it in the root README table and in root `package.json` `"pi.extensions"` if git-install of the monorepo should load it
-4. Document usage under `docs/usage/`
+3. Declare the pi packages you import in `"peerDependencies"` with `"*"` (e.g. `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`); pi provides them at load time
+4. List it in the root README table and in root `package.json` `"pi.extensions"` if git-install of the monorepo should load it
+5. Document usage under `docs/usage/`
+6. Release with a per-package tag `pi-<name>-vX.Y.Z` (no workflow change needed)
 
 See [AGENTS.md](../AGENTS.md) and [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Release
 
-Version bump in the package → tag `vX.Y.Z` on `main` → [releases.md](releases.md).
+Version bump in the package → tag `pi-<name>-vX.Y.Z` on `main` → [releases.md](releases.md).
+Each package releases independently.

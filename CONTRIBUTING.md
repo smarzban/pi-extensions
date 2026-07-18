@@ -40,12 +40,14 @@ Prefer that form. Area scopes (`pi-pacman`, `docs`, `release`) are welcome when 
 
 ## Releases
 
-Maintainers: bump `packages/<name>/package.json` version on `main`, then:
+Maintainers: bump `packages/<name>/package.json` version on `main`, then push a **per-package** tag:
 
 ```bash
-git tag vX.Y.Z
-git push origin vX.Y.Z
+git tag pi-pacman-v0.1.1        # pi-<name>-vX.Y.Z
+git push origin pi-pacman-v0.1.1
 ```
+
+Each package releases independently.
 
 Requires npm Trusted Publisher (see [docs/releases.md](docs/releases.md)). Do not commit npm tokens.
 

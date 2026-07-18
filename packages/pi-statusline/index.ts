@@ -1,5 +1,5 @@
 /**
- * pi-statusline — session name on the editor top border + stats footer
+ * pi-statusline: session name on the editor top border + stats footer
  *
  *   ─────────────── the-name ─
  *   text box
@@ -11,16 +11,18 @@
  *
  * Commands:
  *   /statusline [on|off|refresh]
+ *   /statusline usage [on|off]   Opt in/out of provider quota (off by default; reads auth + network)
  */
 
 import { execFileSync, execSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
 	CustomEditor,
 	type ExtensionAPI,
 	type ExtensionContext,
+	getAgentDir,
 	type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
@@ -59,7 +61,47 @@ interface GitState {
 const USAGE_REFRESH_MS = 5 * 60_000;
 const STATUS_KEY = "statusline";
 
+// ── persisted settings ───────────────────────────────────────────────
+
+interface PersistedState {
+	/** Custom footer/editor enabled (default true). */
+	enabled?: boolean;
+	/**
+	 * Provider quota display. OFF by default: while off, no auth files are read and no
+	 * network calls are made. Turn on with `/statusline usage on`.
+	 */
+	usageEnabled?: boolean;
+}
+
+function statePath(): string {
+	return join(getAgentDir(), "statusline.json");
+}
+
+function loadState(): PersistedState {
+	const path = statePath();
+	if (!existsSync(path)) return {};
+	try {
+		return JSON.parse(readFileSync(path, "utf-8")) as PersistedState;
+	} catch {
+		return {};
+	}
+}
+
+function saveState(state: PersistedState): void {
+	const path = statePath();
+	try {
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, `${JSON.stringify(state, null, "\t")}\n`, "utf-8");
+	} catch {
+		// Non-fatal: statusline still works without persistence.
+	}
+}
+
 // ── auth helpers ─────────────────────────────────────────────────────
+//
+// Everything below (reading auth files, resolving `!cmd`/ENV auth values, and the network
+// fetchers) is reached ONLY when the user has opted into provider usage via
+// `/statusline usage on`. With usage off (the default), none of this runs.
 
 function loadAuthJson(): Record<string, any> {
 	const path = join(homedir(), ".pi", "agent", "auth.json");
@@ -384,16 +426,23 @@ function fitBorder(
 // ── extension ────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
-	let enabled = true;
+	const saved = loadState();
+	let enabled = saved.enabled !== false;
+	// Provider quota is opt-in: nothing is read or fetched until the user turns it on.
+	let usageEnabled = saved.usageEnabled === true;
 	let thinkingLevel = "off";
 	let sessionName: string | undefined;
 	let git: GitState | null = null;
 	let prNumber: number | null = null;
+	/** Branch that `prNumber` was resolved for, so we don't re-run `gh` when it hasn't changed. */
+	let prBranch: string | null = null;
 	let latestUsage: UsageSnapshot | null = null;
 	let activeUsageKey: string | null = null;
 	let refreshTimer: ReturnType<typeof setInterval> | null = null;
 	let tuiRef: { requestRender: () => void } | null = null;
 	const usageCache = new Map<string, UsageSnapshot>();
+
+	const persist = () => saveState({ enabled, usageEnabled });
 
 	const stopTimer = () => {
 		if (refreshTimer) {
@@ -435,8 +484,19 @@ export default function (pi: ExtensionAPI) {
 		return PROVIDER_MAP[provider] ?? null;
 	};
 
+	// Local git status is cheap: safe to run every turn.
 	const refreshGit = (cwd: string) => {
 		git = readGit(cwd);
+		tuiRef?.requestRender();
+	};
+
+	// The PR lookup spawns `gh pr view` (a GitHub API round-trip). Only run it when the branch
+	// changed (PR can only differ then) or on an explicit refresh, not on every turn. Caches by
+	// branch so a no-op branch event doesn't re-hit the API.
+	const refreshPr = (cwd: string, force = false) => {
+		const branch = git?.branch ?? null;
+		if (!force && branch === prBranch) return;
+		prBranch = branch;
 		prNumber = readPrNumber(cwd);
 		tuiRef?.requestRender();
 	};
@@ -484,7 +544,7 @@ export default function (pi: ExtensionAPI) {
 			: theme.fg("accent", modelId);
 		const modelSeg = bracket(theme, modelInner);
 
-		// context — color: default <50%, warning ≥50%, error ≥70%
+		// context color: default <50%, warning ≥50%, error ≥70%
 		const cu = ctx.getContextUsage?.();
 		const total = cu?.contextWindow ?? ctx.model?.contextWindow ?? 0;
 		const used = cu?.tokens ?? null;
@@ -496,7 +556,7 @@ export default function (pi: ExtensionAPI) {
 					: null;
 		const ctxColor =
 			pct == null ? "dim" : pct >= 70 ? "error" : pct >= 50 ? "warning" : "success";
-		let ctxInner = dim("ctx —");
+		let ctxInner = dim("ctx ?");
 		if (pct != null && used != null && total > 0) {
 			ctxInner =
 				theme.fg(ctxColor, `ctx ${pct}%`) +
@@ -523,7 +583,7 @@ export default function (pi: ExtensionAPI) {
 				? bracket(theme, dim(`$${totalCost.toFixed(3)}`))
 				: "";
 
-		// provider usage — Codex only (when windows available)
+		// provider usage: Codex only (when windows available)
 		const usageSegs: string[] = [];
 		if (latestUsage?.windows.length) {
 			for (const w of latestUsage.windows) {
@@ -621,13 +681,17 @@ export default function (pi: ExtensionAPI) {
 			tuiRef = tui;
 			const unsubBranch = footerData.onBranchChange(() => {
 				refreshGit(ctx.cwd);
+				refreshPr(ctx.cwd);
 			});
 
 			refreshGit(ctx.cwd);
-			const key = detectUsageKey(ctx.model?.provider);
-			if (key) {
-				pullUsage(key);
-				startTimer();
+			refreshPr(ctx.cwd, true);
+			if (usageEnabled) {
+				const key = detectUsageKey(ctx.model?.provider);
+				if (key) {
+					pullUsage(key);
+					startTimer();
+				}
 			}
 
 			return {
@@ -672,14 +736,16 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("model_select", async (event, ctx) => {
-		const key = detectUsageKey(event.model?.provider);
-		if (key) {
-			pullUsage(key, true);
-			startTimer();
-		} else {
-			activeUsageKey = null;
-			latestUsage = null;
-			stopTimer();
+		if (usageEnabled) {
+			const key = detectUsageKey(event.model?.provider);
+			if (key) {
+				pullUsage(key, true);
+				startTimer();
+			} else {
+				activeUsageKey = null;
+				latestUsage = null;
+				stopTimer();
+			}
 		}
 		tuiRef?.requestRender();
 		// ensure UI bound after restore
@@ -687,51 +753,98 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("turn_end", async (_event, ctx) => {
+		// Cheap local git only. The PR lookup is left to branch change / manual refresh.
 		refreshGit(ctx.cwd);
 	});
 
 	// ── command ──────────────────────────────────────────────────────
 
 	pi.registerCommand("statusline", {
-		description: "Statusline footer: on | off | refresh",
+		description: "Statusline footer: on | off | usage on|off | refresh",
 		handler: async (args, ctx) => {
 			const cmd = args.trim().toLowerCase();
 			if (!cmd || cmd === "status") {
+				const usageStr = !usageEnabled
+					? "off"
+					: `${latestUsage?.provider ?? "…"} ${latestUsage?.windows.map((w) => `${w.label}:${Math.round(100 - w.usedPercent)}%`).join(",") || latestUsage?.error || "…"}`;
 				const segs = [
 					`enabled=${enabled}`,
 					`session=${sessionName || ctx.sessionManager.getSessionName() || "(unnamed)"}`,
 					`model=${ctx.model?.provider}/${ctx.model?.id ?? "?"}`,
 					`effort=${thinkingLevel}`,
-					`usage=${latestUsage?.provider ?? "—"} ${latestUsage?.windows.map((w) => `${w.label}:${Math.round(100 - w.usedPercent)}%`).join(",") || latestUsage?.error || "—"}`,
-					`branch=${git?.branch ?? "—"}`,
-					`pr=${prNumber ?? "—"}`,
+					`usage=${usageStr}`,
+					`branch=${git?.branch ?? "none"}`,
+					`pr=${prNumber ?? "none"}`,
 				];
 				ctx.ui.notify(segs.join(" · "), "info");
 				return;
 			}
 			if (cmd === "on" || cmd === "enable") {
 				enabled = true;
+				persist();
 				applyAll(ctx);
 				ctx.ui.notify("Statusline on", "info");
 				return;
 			}
 			if (cmd === "off" || cmd === "disable" || cmd === "default") {
 				enabled = false;
+				persist();
 				stopTimer();
 				ctx.ui.setFooter(undefined);
 				ctx.ui.setEditorComponent(undefined);
 				ctx.ui.notify("Default footer + editor restored", "info");
 				return;
 			}
+			// Provider quota display is opt-in (reads auth + calls the provider). Codex only.
+			if (cmd === "usage" || cmd.startsWith("usage ")) {
+				const arg = cmd.slice("usage".length).trim();
+				if (arg === "" || arg === "status") {
+					ctx.ui.notify(
+						`Provider usage: ${usageEnabled ? "on" : "off"} (off = no tokens read, no network). Toggle: /statusline usage on|off`,
+						"info",
+					);
+					return;
+				}
+				if (arg === "on" || arg === "enable") {
+					usageEnabled = true;
+					persist();
+					const key = detectUsageKey(ctx.model?.provider);
+					if (key) {
+						pullUsage(key, true);
+						startTimer();
+					}
+					tuiRef?.requestRender();
+					ctx.ui.notify(
+						"Provider usage on. Reads ~/.pi/agent/auth.json and calls the provider's usage API (Codex only).",
+						"info",
+					);
+					return;
+				}
+				if (arg === "off" || arg === "disable") {
+					usageEnabled = false;
+					activeUsageKey = null;
+					latestUsage = null;
+					stopTimer();
+					persist();
+					tuiRef?.requestRender();
+					ctx.ui.notify("Provider usage off. No tokens read, no network calls.", "info");
+					return;
+				}
+				ctx.ui.notify("Usage: /statusline usage [on|off]", "error");
+				return;
+			}
 			if (cmd === "refresh") {
 				refreshGit(ctx.cwd);
-				const key = detectUsageKey(ctx.model?.provider);
-				if (key) pullUsage(key, true);
+				refreshPr(ctx.cwd, true);
+				if (usageEnabled) {
+					const key = detectUsageKey(ctx.model?.provider);
+					if (key) pullUsage(key, true);
+				}
 				tuiRef?.requestRender();
 				ctx.ui.notify("Statusline refreshed", "info");
 				return;
 			}
-			ctx.ui.notify("Usage: /statusline [on|off|refresh]", "error");
+			ctx.ui.notify("Usage: /statusline [on|off|usage on|off|refresh]", "error");
 		},
 	});
 }

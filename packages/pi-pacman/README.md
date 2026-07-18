@@ -1,16 +1,16 @@
 # @pi-extensions/pi-pacman
 
-Pac-Man **working indicator** for [pi](https://github.com/earendil-works/pi) — replaces the streaming spinner with pellet runs, ghost chases, arcade tunnels, and fruit bonuses.
+Pac-Man **working indicator** for [pi](https://github.com/earendil-works/pi): replaces the streaming spinner with pellet runs, ghost chases, arcade tunnels, and fruit bonuses.
 
 Part of the [pi-extensions](https://github.com/smarzban/pi-extensions) monorepo.
 
 ## Highlights
 
-- **Drop-in working indicator** — uses `setWorkingIndicator` / `setWorkingMessage` (normal streaming only)
-- **Five looks** — full-width `classic` & `chase`, plus fixed-width `mini`, `arcade`, `fruit` (default 10 cells, configurable)
-- **Rotate mode** — cycle short looks every agent message (`/pacman rotate`)
-- **Random working blurbs** — arcade + AI/token-flavored lines each run (or lock your own)
-- **Remembers your choice** — look, rotate, cells, and custom message in `~/.pi/agent/pacman-thinking.json`
+- **Drop-in working indicator**: uses `setWorkingIndicator` / `setWorkingMessage` (normal streaming only)
+- **Five looks**: full-width `classic` & `chase`, plus fixed-width `mini`, `arcade`, `fruit` (default 10 cells, configurable)
+- **Rotate mode**: cycle short looks every agent message (`/pacman rotate`)
+- **Random working blurbs**: arcade + AI/token-flavored lines each run (or lock your own)
+- **Remembers your choice**: look, rotate, cells, and custom message in `~/.pi/agent/pacman-thinking.json`
 
 ## Quickstart
 
@@ -26,17 +26,17 @@ Restart pi (or start a new session), send a message, and you should see a yellow
 
 Default look is **classic** (full-width pellet run). Footer status shows `ᗧ classic` while the extension is active.
 
-The indicator only appears while the agent is **streaming a normal response** — not during compaction/retry loaders.
+The indicator only appears while the agent is **streaming a normal response**, not during compaction/retry loaders.
 
 ## Install
 
-| Method | Command |
-|--------|---------|
-| **npm** (recommended) | `pi install npm:@pi-extensions/pi-pacman` |
-| **git** (whole monorepo) | `pi install git:github.com/smarzban/pi-extensions` |
-| **local path** | `pi install /absolute/path/to/pi-extensions/packages/pi-pacman` |
+| Method | Loads | Command |
+|--------|-------|---------|
+| **npm** (recommended) | This package only | `pi install npm:@pi-extensions/pi-pacman` |
+| **local path** | This package only | `pi install /absolute/path/to/pi-extensions/packages/pi-pacman` |
+| **git** (whole monorepo) | All packages in the repo | `pi install git:github.com/smarzban/pi-extensions` |
 
-More detail: [docs/install](../../docs/install/README.md).
+More detail: [docs/install](../../docs/install/README.md) (one package vs whole monorepo).
 
 ## Usage
 

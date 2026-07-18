@@ -34,7 +34,7 @@ Example:
 
 ## When it writes
 
-On every `apply()` — including session start, look changes, rotate advances, and message updates. Failures to write are ignored (indicator still works).
+On every `apply()`, including session start, look changes, rotate advances, and message updates. Failures to write are ignored (indicator still works).
 
 ## Migration
 

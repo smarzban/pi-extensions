@@ -1,14 +1,22 @@
-# Release: publish @pi-extensions/pi-pacman to npm on a version tag, via OIDC trusted publishing.
+# Release: publish a single package to npm on a per-package version tag, via OIDC trusted publishing.
 #
-# ARMED BUT UNFIRED until BOTH one-time maintainer steps are done (see docs/releases.md):
-#   1. First-publish @pi-extensions/pi-pacman once (granular token w/ bypass 2FA, or OTP) so the
-#      package exists under the pi-extensions npm org (trusted publishers need an existing package).
-#   2. On npmjs.com → @pi-extensions/pi-pacman → Settings → Trusted Publisher:
+# Each package under packages/* releases and versions INDEPENDENTLY. The tag names the package:
+#
+#     pi-pacman-v0.1.1        -> publishes packages/pi-pacman    @ 0.1.1
+#     pi-statusline-v0.2.0    -> publishes packages/pi-statusline @ 0.2.0
+#
+# The job derives the package directory and version from the tag, so adding a package needs NO
+# change here: just tag it `pi-<name>-vX.Y.Z` once the package exists under packages/.
+#
+# ARMED BUT UNFIRED for a package until BOTH one-time maintainer steps are done (see docs/releases.md):
+#   1. First-publish that package once (granular token w/ bypass 2FA, or OTP) so it exists under the
+#      pi-extensions npm org (trusted publishers can only attach to an existing package).
+#   2. On npmjs.com -> the package -> Settings -> Trusted Publisher:
 #        Organization/user: smarzban
 #        Repository:        pi-extensions
-#        Workflow filename: release.yml
+#        Workflow filename: release.yml   (this same file publishes every package)
 #        Environment:       (leave empty)
-#      THEN this workflow publishes token-lessly.
+#      THEN this workflow publishes token-lessly for that package.
 #
 # NO npm token lives here. Trusted publishing exchanges a short-lived GitHub OIDC token
 # (id-token: write) for publish rights; provenance is automatic on public repos.
@@ -17,7 +25,7 @@ name: release
 on:
   push:
     tags:
-      - "v*"
+      - "pi-*-v*"
 
 permissions:
   contents: read
@@ -28,54 +36,73 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish-pi-pacman:
+  publish:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: packages/pi-pacman
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # Parse `pi-<name>-vX.Y.Z` -> package dir + version. Fails loudly on a malformed or
+      # unknown-package tag before anything is installed or published.
+      - name: Resolve package from tag
+        id: pkg
+        run: |
+          TAG="$GITHUB_REF_NAME"                 # e.g. pi-pacman-v0.1.1
+          case "$TAG" in
+            pi-*-v*) ;;
+            *) echo "::error::tag $TAG is not of the form pi-<name>-vX.Y.Z"; exit 1 ;;
+          esac
+          NAME="${TAG%-v*}"                      # pi-pacman
+          VERSION="${TAG##*-v}"                  # 0.1.1
+          DIR="packages/$NAME"
+          if [ ! -f "$DIR/package.json" ]; then
+            echo "::error::no package at $DIR for tag $TAG"; exit 1
+          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "resolved $TAG -> $DIR @ $VERSION"
+
       # SECURITY: run before any install from the checked-out tree. Tag pushes use the
-      # workflow file FROM the tagged commit — tag protection on v* is still the primary control.
+      # workflow file FROM the tagged commit; tag protection on pi-*-v* is still the primary control.
       - name: Verify the tagged commit is on main
-        working-directory: .
         run: |
           git fetch --quiet origin main
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "::error::tag $GITHUB_REF_NAME points at $GITHUB_SHA, not on origin/main — refusing to publish an unreviewed commit"
+            echo "::error::tag $GITHUB_REF_NAME points at $GITHUB_SHA, not on origin/main, refusing to publish an unreviewed commit"
             exit 1
           fi
-          echo "$GITHUB_SHA is on origin/main — proceeding"
+          echo "$GITHUB_SHA is on origin/main, proceeding"
 
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
-      # OIDC trusted publishing needs npm >= 11.5.1. Pin it — do not float npm@latest in a
+      # OIDC trusted publishing needs npm >= 11.5.1. Pin it; do not float npm@latest in a
       # job that holds id-token:write + publish rights.
       - name: Pin npm for OIDC publish
-        working-directory: .
         run: npm install -g npm@11.5.1
 
       - name: Verify tag matches package.json version
+        working-directory: ${{ steps.pkg.outputs.dir }}
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
+          TAG="${{ steps.pkg.outputs.version }}"
           PKG="$(node -p "require('./package.json').version")"
           NAME="$(node -p "require('./package.json').name")"
           if [ "$TAG" != "$PKG" ]; then
-            echo "::error::tag v$TAG does not match $NAME package.json version $PKG"
+            echo "::error::tag version $TAG does not match $NAME package.json version $PKG"
             exit 1
           fi
           echo "publishing $NAME@$PKG (tag $GITHUB_REF_NAME)"
 
       - name: Pack dry-run (green bar)
+        working-directory: ${{ steps.pkg.outputs.dir }}
         run: npm pack --dry-run
 
       # Provenance is automatic under trusted publishing for public repos; disable when private
       # (npm rejects provenance from private sources).
       - name: Publish to npm
+        working-directory: ${{ steps.pkg.outputs.dir }}
         run: npm publish --provenance=${{ !github.event.repository.private }}
