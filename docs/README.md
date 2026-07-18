@@ -1,6 +1,6 @@
 # Documentation
 
-**pi-extensions** is a monorepo of [pi](https://github.com/earendil-works/pi) packages under the npm org `@pi-extensions`. Package-specific install and usage live in each package README (e.g. [pi-pacman](../packages/pi-pacman/README.md)); this tree holds shared install, release, and development docs plus the current package’s usage guides.
+**pi-extensions** is a monorepo of [pi](https://github.com/earendil-works/pi) packages under the npm org `@pi-extensions`. Package-specific install and usage live in each package README (e.g. [pi-pacman](../packages/pi-pacman/README.md), [pi-statusline](../packages/pi-statusline/README.md)); this tree holds shared install, release, and development docs plus per-package usage guides where present (currently pi-pacman).
 
 ## Who starts where
 

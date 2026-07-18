@@ -29,6 +29,9 @@
 			"./index.ts"
 		]
 	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*"
+	},
 	"files": [
 		"index.ts",
 		"README.md",

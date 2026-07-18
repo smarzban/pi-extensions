@@ -9,7 +9,7 @@ Each package under `packages/` is independent: its own `package.json`, entrypoin
 - **One extension per package** — no cross-package dependencies
 - **TypeScript, no build step** — pi loads sources via jiti
 - **npm org `@pi-extensions`** — scoped, public packages with `pi-package` keywords for gallery discoverability
-- **Tag-driven releases** — `vX.Y.Z` → GitHub Actions OIDC → npm
+- **Tag-driven releases** — per-package `pi-<name>-vX.Y.Z` → GitHub Actions OIDC → npm
 
 ## Packages
 
@@ -66,7 +66,7 @@ Modeled after [ogulcancelik/pi-extensions](https://github.com/ogulcancelik/pi-ex
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Releases are tag-driven (`v*`) via GitHub Actions OIDC — [docs/releases.md](docs/releases.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Releases are tag-driven (per-package `pi-<name>-v*`) via GitHub Actions OIDC. See [docs/releases.md](docs/releases.md).
 
 ## License
 

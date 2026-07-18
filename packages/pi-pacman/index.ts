@@ -503,6 +503,11 @@ export default function (pi: ExtensionAPI) {
 		apply(ctx);
 	});
 
+	pi.on("session_shutdown", async () => {
+		// Drop the resize listener so reloads don't stack duplicates.
+		process.stdout.off?.("resize", reapplyIfFullWidth);
+	});
+
 	pi.registerCommand("pacman", {
 		description: "Pac-Man indicator. Try: /pacman list · /pacman rotate",
 		handler: async (args, ctx) => {

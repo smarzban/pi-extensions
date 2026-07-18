@@ -1,22 +1,35 @@
 # Changelog
 
-All notable changes to packages in this monorepo are documented here.  
-The npm package **`@pi-extensions/pi-pacman`** is versioned independently under `packages/pi-pacman`.
+All notable changes to packages in this monorepo are documented here.
+Each package is versioned and released independently under `packages/<name>`, via per-package tags
+`pi-<name>-vX.Y.Z` (see [docs/releases.md](docs/releases.md)).
 
-## [0.1.0] — 2026-07-17
-
-### @pi-extensions/pi-pacman
-
-Initial public release.
-
-- Pac-Man working indicator via `setWorkingIndicator` / `setWorkingMessage`
-- Looks: `classic`, `chase`, `mini`, `arcade`, `fruit`
-- Commands: `/pacman` list, look lock, rotate, off, message, clear
-- Persistence: `~/.pi/agent/pacman-thinking.json`
-- Full-width tracks for classic/chase; 7-cell fixed looks
-- Frame timing: 80 ms full-width, 110 ms fixed
+## Unreleased
 
 ### Monorepo
 
-- GitHub Actions CI (`npm pack --dry-run` per package)
-- Tag-driven OIDC release workflow for npm
+- Release workflow publishes any package from a per-package tag (`pi-<name>-vX.Y.Z`); each package
+  versions and releases independently. Replaces the single `v*` tag that only published pi-pacman.
+
+## pi-statusline 0.1.0 (2026-07-17)
+
+Initial release.
+
+- Session name on the editor top border; footer with model/effort, context, session cost, git
+  branch/diff/ahead-behind, and PR number (via `gh`)
+- Context and usage color thresholds (green / yellow / red)
+- Provider quota display for **openai-codex**, opt-in and off by default: no auth files are read and
+  no network calls are made until `/statusline usage on`. State in `~/.pi/agent/statusline.json`
+- Declares `peerDependencies` (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`); Node `>=20`
+
+## pi-pacman 0.1.0 (2026-07-17)
+
+Initial release.
+
+- Pac-Man working indicator via `setWorkingIndicator` / `setWorkingMessage`
+- Looks: `classic`, `chase`, `mini`, `arcade`, `fruit`
+- Commands: `/pacman` list, look lock, rotate, off, message, cells, clear
+- Persistence: `~/.pi/agent/pacman-thinking.json`
+- Full-width tracks for classic/chase; configurable fixed-look width (default 10 cells, range 4 to 40)
+- Frame timing: 80 ms full-width, 110 ms fixed
+- Declares `peerDependencies` (`@earendil-works/pi-coding-agent`); Node `>=18`
