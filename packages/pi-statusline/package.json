@@ -27,7 +27,8 @@
 	"pi": {
 		"extensions": [
 			"./index.ts"
-		]
+		],
+		"image": "https://raw.githubusercontent.com/smarzban/pi-extensions/main/packages/pi-statusline/pi-statusline.png"
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": "*",
@@ -36,7 +37,8 @@
 	"files": [
 		"index.ts",
 		"README.md",
-		"LICENSE"
+		"LICENSE",
+		"pi-statusline.png"
 	],
 	"publishConfig": {
 		"access": "public"
