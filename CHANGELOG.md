@@ -11,6 +11,13 @@ Each package is versioned and released independently under `packages/<name>`, vi
 - Release workflow publishes any package from a per-package tag (`pi-<name>-vX.Y.Z`); each package
   versions and releases independently. Replaces the single `v*` tag that only published pi-pacman.
 
+### pi-statusline
+
+- Redesign the editor as a rounded text box with a `›` prompt.
+- Move the session name to the editor's bottom-right border.
+- Keep model/effort and the remaining runtime statistics in the footer.
+- Refresh the current branch's open PR after agent runs with a 30-second debounce (async, never blocks the UI), hiding merged or closed PRs.
+
 ## pi-statusline 0.1.1 (2026-07-18)
 
 - Clarify one-package npm and local-path installs versus whole-monorepo git installs.

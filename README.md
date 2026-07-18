@@ -16,7 +16,7 @@ Each package under `packages/` is independent: its own `package.json`, entrypoin
 | Package | npm | Description |
 |---------|-----|-------------|
 | [pi-pacman](packages/pi-pacman) | [`@pi-extensions/pi-pacman`](https://www.npmjs.com/package/@pi-extensions/pi-pacman) | Pac-Man working / thinking indicator |
-| [pi-statusline](packages/pi-statusline) | [`@pi-extensions/pi-statusline`](https://www.npmjs.com/package/@pi-extensions/pi-statusline) | Custom footer: session name, model/effort, context, usage, git/PR |
+| [pi-statusline](packages/pi-statusline) | [`@pi-extensions/pi-statusline`](https://www.npmjs.com/package/@pi-extensions/pi-statusline) | Rounded editor box with bottom-right session name; model/effort, context, usage, git/PR footer |
 
 Package docs, install, and commands live in each package’s README (e.g. [packages/pi-pacman/README.md](packages/pi-pacman/README.md)).
 
