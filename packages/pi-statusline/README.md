@@ -34,13 +34,13 @@ Example (default, no provider-usage segment until you opt in):
 ```text
 ╭─────────────────────────────╮
 │ › type here…                │
-╰────────────────────── my task ─╯
+╰────────────────────── my task ──╯
 [gpt-5-codex · high]  [ctx 12% · 24k/200k]  [$0.042]  [⎇ main +1 *2 ?1]  [#12]
 ```
 
 After `/statusline usage on`, a Codex quota segment appears: `[5h 80% rem · 4h]`.
 
-The current branch's open PR is checked on startup, branch changes, `/statusline refresh`, and at most once every 30 seconds after an agent run. Merged or closed PRs disappear automatically after the next check.
+The current branch's open PR is checked on startup, branch changes, `/statusline refresh`, and at most once every 30 seconds after an agent run. Lookups run in the background and never block the editor. Merged or closed PRs disappear automatically after the next check.
 
 ## Commands
 

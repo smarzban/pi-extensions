@@ -14,7 +14,7 @@
  *   /statusline usage [on|off]   Opt in/out of provider quota (off by default; reads auth + network)
  */
 
-import { execFileSync, execSync } from "node:child_process";
+import { execFile, execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -367,25 +367,37 @@ function readGit(cwd: string): GitState | null {
 	}
 }
 
-function readPrNumber(cwd: string): number | null {
-	try {
-		const out = execFileSync(
+/**
+ * Async so the TUI event loop never blocks on a GitHub API round-trip.
+ * Result tri-state: `undefined` = lookup failed (caller keeps the current
+ * value), `null` = definitively no open PR (merged/closed/none — caller
+ * clears the segment), number = open PR.
+ */
+function readPrNumber(cwd: string): Promise<number | null | undefined> {
+	return new Promise((resolve) => {
+		execFile(
 			"gh",
 			["pr", "view", "--json", "number,state"],
-			{
-				cwd,
-				encoding: "utf8",
-				timeout: 2500,
-				stdio: ["pipe", "pipe", "pipe"],
+			{ cwd, encoding: "utf8", timeout: 5000 },
+			(error, stdout) => {
+				// `gh` exits non-zero both for "no PR for this branch" and for
+				// network/auth failures; treat both as "keep current value". A
+				// branch that never had a PR keeps prNumber === null anyway.
+				if (error) return resolve(undefined);
+				try {
+					const data = JSON.parse(stdout.trim()) as {
+						number?: unknown;
+						state?: unknown;
+					};
+					if (data.state !== "OPEN") return resolve(null);
+					const n = Number(data.number);
+					resolve(Number.isFinite(n) ? n : undefined);
+				} catch {
+					resolve(undefined);
+				}
 			},
-		).trim();
-		const data = JSON.parse(out) as { number?: unknown; state?: unknown };
-		if (data.state !== "OPEN") return null;
-		const n = Number(data.number);
-		return Number.isFinite(n) ? n : null;
-	} catch {
-		return null;
-	}
+		);
+	});
 }
 
 // ── editor border helpers ────────────────────────────────────────────
@@ -397,24 +409,6 @@ function stripAnsi(text: string): string {
 function isHorizontalBorder(text: string): boolean {
 	const plain = stripAnsi(text);
 	return plain.length > 0 && plain.replace(/─/g, "") === "";
-}
-
-/** Put rounded corners around a line returned by the stock editor. */
-function roundedEditorLine(
-	line: string,
-	width: number,
-	left: string,
-	right: string,
-	border: (text: string) => string,
-): string {
-	const innerWidth = Math.max(0, width - 2);
-	const inner = truncateToWidth(line, innerWidth, "");
-	return (
-		border(left) +
-		inner +
-		" ".repeat(Math.max(0, innerWidth - visibleWidth(inner))) +
-		border(right)
-	);
 }
 
 /** Build a rounded border with an optional right-aligned label. */
@@ -456,6 +450,8 @@ export default function (pi: ExtensionAPI) {
 	let prBranch: string | null = null;
 	/** Last PR lookup, used to debounce the per-turn refresh. */
 	let lastPrLookupAt = 0;
+	/** True while an async `gh pr view` is running; prevents overlapping lookups. */
+	let prLookupInFlight = false;
 	let latestUsage: UsageSnapshot | null = null;
 	let activeUsageKey: string | null = null;
 	let refreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -510,18 +506,37 @@ export default function (pi: ExtensionAPI) {
 		tuiRef?.requestRender();
 	};
 
-	// PR lookup spawns `gh pr view` (a GitHub API round-trip). Check on turns, but debounce
-	// lookups so normal rapid-fire turns do not create a request for every turn. Branch changes
-	// and explicit refreshes always bypass the debounce. Closed/merged PRs return null and clear
-	// the segment.
+	// PR lookup spawns `gh pr view` asynchronously (a GitHub API round-trip that must
+	// never block the TUI). Check on turns, but debounce lookups so rapid-fire turns do
+	// not create a request for every turn, and never stack overlapping lookups. Branch
+	// changes and explicit refreshes always bypass the debounce. Merged/closed PRs
+	// return null and clear the segment; failed lookups keep the current value.
 	const refreshPr = (cwd: string, force = false) => {
 		const branch = git?.branch ?? null;
 		const branchChanged = branch !== prBranch;
 		if (!force && !branchChanged && Date.now() - lastPrLookupAt < PR_REFRESH_MS) return;
+		if (prLookupInFlight) return;
 		prBranch = branch;
 		lastPrLookupAt = Date.now();
-		prNumber = branch ? readPrNumber(cwd) : null;
-		tuiRef?.requestRender();
+		if (!branch) {
+			if (prNumber !== null) {
+				prNumber = null;
+				tuiRef?.requestRender();
+			}
+			return;
+		}
+		prLookupInFlight = true;
+		readPrNumber(cwd)
+			.then((n) => {
+				prLookupInFlight = false;
+				if ((git?.branch ?? null) !== branch) return; // branch moved on; discard
+				if (n === undefined || n === prNumber) return; // failed or unchanged
+				prNumber = n;
+				tuiRef?.requestRender();
+			})
+			.catch(() => {
+				prLookupInFlight = false;
+			});
 	};
 
 	const resolveName = (ctx?: ExtensionContext): string | undefined => {
@@ -674,35 +689,50 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			render(width: number): string[] {
-				if (width < 3) return super.render(width);
+				if (width < 6) return super.render(width);
 
-				// Render two columns narrower so the outer │ borders do not change wrapping.
+				// Render four columns narrower: two for the outer │ borders and two for
+				// the "› " hanging prompt. Nothing is truncated afterwards, so a full
+				// first line keeps its last character and the cursor cell / IME marker
+				// always survive.
 				const innerWidth = width - 2;
-				const lines = super.render(innerWidth);
+				const lines = super.render(innerWidth - 2);
 				if (lines.length < 2) return lines;
 
 				const borderColor = (text: string) => this.borderColor(text);
-				const bottomIndex = lines.findIndex(
+				const prompt = `${ctx.ui.theme.fg("accent", "›")} `;
+
+				// Border-like lines (visible text ends with ─: the horizontal borders
+				// and any "↑/↓ N more" scroll indicator) are extended with ─ so the
+				// indicator stays intact inside the shell; text lines get the hanging
+				// prompt/indent and are space-padded.
+				const wrap = (line: string, left: string, right: string, prefix: string) => {
+					const borderLike = stripAnsi(line).endsWith("─");
+					const content = borderLike ? line : prefix + line;
+					const gap = Math.max(0, innerWidth - visibleWidth(content));
+					const fill = borderLike ? borderColor("─".repeat(gap)) : " ".repeat(gap);
+					return borderColor(left) + content + fill + borderColor(right);
+				};
+
+				// The bottom border is the last all-─ line; searching from the end keeps
+				// a user-typed ─── rule from being mistaken for it. When the editor is
+				// scrolled the bottom border carries a "↓ N more" indicator and is not
+				// all-─, so it stays visible as a boxed line above the ╰──╯ appended below.
+				const bottomIndex = lines.findLastIndex(
 					(line, index) => index > 0 && isHorizontalBorder(line),
 				);
 				const endOfEditor = bottomIndex === -1 ? lines.length : bottomIndex;
 				const body = lines.slice(1, endOfEditor);
 				const extra = bottomIndex === -1 ? [] : lines.slice(bottomIndex + 1);
 
-				const result = [
-					roundedEditorLine(lines[0]!, width, "╭", "╮", borderColor),
-				];
+				const result = [wrap(lines[0]!, "╭", "╮", "")];
 				for (let index = 0; index < body.length; index++) {
-					let line = body[index]!;
-					if (index === 0) {
-						// Match pi's prompt glyph while leaving the editor text itself unchanged.
-						line = `${ctx.ui.theme.fg("accent", "›")} ${line}`;
-					}
-					result.push(roundedEditorLine(line, width, "│", "│", borderColor));
+					result.push(wrap(body[index]!, "│", "│", index === 0 ? prompt : "  "));
 				}
-				// Autocomplete entries remain inside the same rounded shell.
+				// Autocomplete entries remain inside the same rounded shell, aligned
+				// with the input text.
 				for (const line of extra) {
-					result.push(roundedEditorLine(line, width, "│", "│", borderColor));
+					result.push(wrap(line, "│", "│", "  "));
 				}
 				const name = resolveName(ctx);
 				result.push(
