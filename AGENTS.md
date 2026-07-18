@@ -32,7 +32,7 @@ Each package has its own `package.json` with `"pi": { "extensions": [...] }` dec
 ## Build / test / verify
 
 - Build: none — extensions are TypeScript loaded by pi via jiti (no compile step)
-- Test: per-package if present (none yet for pi-pacman)
+- Test: per-package if present (none yet in any package)
 - Canonical verify: `cd packages/pi-pacman && npm pack --dry-run` (same for each package under `packages/*`)
 - Install local package into pi: `pi install /absolute/path/to/pi-extensions/packages/pi-<name>`
 - Publish: bump a package's version on `main`, tag `pi-<name>-vX.Y.Z` matching its `package.json`, push tag → `.github/workflows/release.yml` (OIDC). Each package releases independently. See [docs/releases.md](docs/releases.md).
