@@ -27,7 +27,8 @@
 	"pi": {
 		"extensions": [
 			"./index.ts"
-		]
+		],
+		"image": "https://raw.githubusercontent.com/smarzban/pi-extensions/main/packages/pi-pacman/pac-man.gif"
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": "*"
@@ -35,7 +36,8 @@
 	"files": [
 		"index.ts",
 		"README.md",
-		"LICENSE"
+		"LICENSE",
+		"pac-man.gif"
 	],
 	"publishConfig": {
 		"access": "public"
