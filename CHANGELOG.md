@@ -11,6 +11,21 @@ Each package is versioned and released independently under `packages/<name>`, vi
 - Release workflow publishes any package from a per-package tag (`pi-<name>-vX.Y.Z`); each package
   versions and releases independently. Replaces the single `v*` tag that only published pi-pacman.
 
+## pi-statusline 0.1.1 (2026-07-18)
+
+- Clarify one-package npm and local-path installs versus whole-monorepo git installs.
+- Make provider quota usage opt-in and keep it disabled by default.
+- Avoid repeated GitHub PR lookups during normal turns.
+- Add package peer dependencies and prepare independent package releases.
+
+## pi-pacman 0.1.1 (2026-07-18)
+
+- Restore the default fixed-look width to 10 cells.
+- Add configurable fixed-look width through `/pacman cells` and persisted state.
+- Remove fruit score pop frames.
+- Clean up the resize listener during session shutdown.
+- Add package peer dependencies and prepare independent package releases.
+
 ## pi-statusline 0.1.0 (2026-07-17)
 
 Initial release.
