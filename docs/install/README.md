@@ -1,9 +1,20 @@
 # Install
 
-How to load packages from this monorepo into [pi](https://github.com/earendil-works/pi). Each package
-installs independently; pick the one(s) you want.
+How to load packages from this monorepo into [pi](https://github.com/earendil-works/pi).
+
+## One package vs whole monorepo
+
+| Goal | How |
+|------|-----|
+| **Only one extension** (usual for users) | **npm** or a **local path** to that package under `packages/pi-<name>` |
+| **Every package** in this repo | **git** monorepo install (or install each npm package you want) |
+
+Prefer **npm** for day-to-day use. Git monorepo install is a convenience for cloning the whole
+repo into pi; it is not the way to pick a single package.
 
 ## npm (recommended)
+
+Installs **one package** per command. Run only the line(s) you want:
 
 ```bash
 pi install npm:@pi-extensions/pi-pacman
@@ -18,7 +29,7 @@ pi install npm:@pi-extensions/pi-pacman@0.1.0
 
 ## git (whole monorepo)
 
-Installs every package the root `package.json` declares:
+Installs **every** package listed in the root `package.json`:
 
 ```json
 "pi": { "extensions": ["./packages/pi-pacman", "./packages/pi-statusline"] }
@@ -28,7 +39,12 @@ Installs every package the root `package.json` declares:
 pi install git:github.com/smarzban/pi-extensions
 ```
 
+You cannot select a single package with this form. For one package only, use npm or a local path
+to `packages/pi-<name>`.
+
 ## local path
+
+Installs **one package**: point at that package directory (not the monorepo root).
 
 For development against a checkout:
 

@@ -2,7 +2,7 @@
 
 **Pi packages monorepo**: installable [pi](https://github.com/earendil-works/pi) coding-agent extensions, published under the npm org [`@pi-extensions`](https://www.npmjs.com/org/pi-extensions).
 
-Each package under `packages/` is independent: its own `package.json`, entrypoint, README, and version. Install one package, the whole monorepo from git, or a local path.
+Each package under `packages/` is independent: its own `package.json`, entrypoint, README, and version. Users usually install **one package via npm**. Git monorepo install loads every package; local path installs a single package directory.
 
 ## Highlights
 
@@ -32,11 +32,11 @@ Restart pi (or start a new session) so the extension loads. See the package READ
 
 Other install methods:
 
-| Method | Command |
-|--------|---------|
-| **npm** (recommended) | `pi install npm:@pi-extensions/<name>` |
-| **git** (whole monorepo) | `pi install git:github.com/smarzban/pi-extensions` |
-| **local path** | `pi install /absolute/path/to/pi-extensions/packages/pi-<name>` |
+| Method | Loads | Command |
+|--------|-------|---------|
+| **npm** (recommended) | One package | `pi install npm:@pi-extensions/<name>` |
+| **local path** | One package | `pi install /absolute/path/to/pi-extensions/packages/pi-<name>` |
+| **git** (whole monorepo) | All packages | `pi install git:github.com/smarzban/pi-extensions` |
 
 Details: [docs/install/](docs/install/README.md).
 
