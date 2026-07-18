@@ -1,9 +1,9 @@
 /**
- * pi-statusline: session name on the editor top border + stats footer
+ * pi-statusline: rounded editor box + session/model stats footer
  *
- *   ─────────────── the-name ─
- *   text box
- *   ─────────────────────────
+ *   ╭─────────────────────────╮
+ *   │ › text box              │
+ *   ╰────────────── name ────╯
  *   [model · effort] [ctx …] [usage] [branch/diff] [#pr]
  *
  * Install:
@@ -385,42 +385,57 @@ function readPrNumber(cwd: string): number | null {
 	}
 }
 
-// ── editor top-border helper ─────────────────────────────────────────
+// ── editor border helpers ────────────────────────────────────────────
 
-/** Build a top/bottom border line with optional left/right labels. */
-function fitBorder(
+function stripAnsi(text: string): string {
+	return text.replace(/[\u001b\u009b][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d/#&.:=?%@~_]+)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g, "");
+}
+
+function isHorizontalBorder(text: string): boolean {
+	const plain = stripAnsi(text);
+	return plain.length > 0 && plain.replace(/─/g, "") === "";
+}
+
+/** Put rounded corners around a line returned by the stock editor. */
+function roundedEditorLine(
+	line: string,
+	width: number,
 	left: string,
 	right: string,
-	width: number,
 	border: (text: string) => string,
-	fill: (text: string) => string = border,
 ): string {
-	if (width <= 0) return "";
-	if (width === 1) return border("─");
-
-	let leftText = left;
-	let rightText = right;
-	const fixedWidth = 2; // leading + trailing ─
-	const minimumGap = 3;
-
-	while (
-		fixedWidth + visibleWidth(leftText) + visibleWidth(rightText) + minimumGap > width &&
-		visibleWidth(rightText) > 0
-	) {
-		rightText = truncateToWidth(rightText, Math.max(0, visibleWidth(rightText) - 1), "");
-	}
-	while (
-		fixedWidth + visibleWidth(leftText) + visibleWidth(rightText) + minimumGap > width &&
-		visibleWidth(leftText) > 0
-	) {
-		leftText = truncateToWidth(leftText, Math.max(0, visibleWidth(leftText) - 1), "");
-	}
-
-	const gapWidth = Math.max(
-		0,
-		width - fixedWidth - visibleWidth(leftText) - visibleWidth(rightText),
+	const innerWidth = Math.max(0, width - 2);
+	const inner = truncateToWidth(line, innerWidth, "");
+	return (
+		border(left) +
+		inner +
+		" ".repeat(Math.max(0, innerWidth - visibleWidth(inner))) +
+		border(right)
 	);
-	return `${border("─")}${leftText}${fill("─".repeat(gapWidth))}${rightText}${border("─")}`;
+}
+
+/** Build a rounded border with an optional right-aligned label. */
+function roundedEditorBorder(
+	width: number,
+	left: string,
+	right: string,
+	border: (text: string) => string,
+	label = "",
+): string {
+	const innerWidth = Math.max(0, width - 2);
+	if (!label) return border(left) + border("─".repeat(innerWidth)) + border(right);
+
+	let labelText = ` ${label} `;
+	const tailWidth = Math.min(2, Math.max(0, innerWidth - visibleWidth(labelText)));
+	labelText = truncateToWidth(labelText, Math.max(0, innerWidth - tailWidth), "");
+	const leftWidth = Math.max(0, innerWidth - visibleWidth(labelText) - tailWidth);
+	return (
+		border(left) +
+		border("─".repeat(leftWidth)) +
+		labelText +
+		border("─".repeat(tailWidth)) +
+		border(right)
+	);
 }
 
 // ── extension ────────────────────────────────────────────────────────
@@ -515,7 +530,7 @@ export default function (pi: ExtensionAPI) {
 		theme.fg("dim", "[") + inner + theme.fg("dim", "]");
 
 	/**
-	 * Stats under the editor (session name lives on the editor top border).
+	 * Stats under the editor.
 	 *   [model · effort] [ctx …] [usage] [branch/diff] [#pr]
 	 */
 	const renderFooterLines = (
@@ -525,7 +540,6 @@ export default function (pi: ExtensionAPI) {
 		footerData?: { getGitBranch(): string | null },
 	): string[] => {
 		const dim = (s: string) => theme.fg("dim", s);
-		resolveName(ctx);
 
 		const level = (() => {
 			try {
@@ -637,7 +651,7 @@ export default function (pi: ExtensionAPI) {
 		return lines.length ? lines : [dim("")];
 	};
 
-	/** Session name on the top border of the text box (right side). */
+	/** Render the editor as a rounded rectangle with a visible prompt. */
 	const applyEditor = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
 		if (!enabled) {
@@ -652,16 +666,47 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			render(width: number): string[] {
-				const lines = super.render(width);
+				if (width < 3) return super.render(width);
+
+				// Render two columns narrower so the outer │ borders do not change wrapping.
+				const innerWidth = width - 2;
+				const lines = super.render(innerWidth);
 				if (lines.length < 2) return lines;
 
-				const thm = ctx.ui.theme;
-				const name = resolveName(ctx);
-				// ─────────────── the-name ─
-				const topRight = name ? thm.fg("accent", ` ${name} `) : "";
 				const borderColor = (text: string) => this.borderColor(text);
-				lines[0] = fitBorder("", topRight, width, borderColor);
-				return lines;
+				const bottomIndex = lines.findIndex(
+					(line, index) => index > 0 && isHorizontalBorder(line),
+				);
+				const endOfEditor = bottomIndex === -1 ? lines.length : bottomIndex;
+				const body = lines.slice(1, endOfEditor);
+				const extra = bottomIndex === -1 ? [] : lines.slice(bottomIndex + 1);
+
+				const result = [
+					roundedEditorLine(lines[0]!, width, "╭", "╮", borderColor),
+				];
+				for (let index = 0; index < body.length; index++) {
+					let line = body[index]!;
+					if (index === 0) {
+						// Match pi's prompt glyph while leaving the editor text itself unchanged.
+						line = `${ctx.ui.theme.fg("accent", "›")} ${line}`;
+					}
+					result.push(roundedEditorLine(line, width, "│", "│", borderColor));
+				}
+				// Autocomplete entries remain inside the same rounded shell.
+				for (const line of extra) {
+					result.push(roundedEditorLine(line, width, "│", "│", borderColor));
+				}
+				const name = resolveName(ctx);
+				result.push(
+					roundedEditorBorder(
+						width,
+						"╰",
+						"╯",
+						borderColor,
+						name ? ctx.ui.theme.fg("accent", name) : "",
+					),
+				);
+				return result;
 			}
 		}
 

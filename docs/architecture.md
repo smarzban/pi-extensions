@@ -8,7 +8,7 @@ Light map of how this monorepo and its packages fit together. Not a deep design 
 pi-extensions (git + npm org @pi-extensions)
 └── packages/
     ├── pi-pacman        ← Pac-Man working indicator
-    └── pi-statusline    ← custom footer + editor-border statusline
+    └── pi-statusline    ← rounded editor box + footer statusline
         └── index.ts     ← each package: an ExtensionAPI default export
 ```
 
@@ -40,8 +40,8 @@ session_shutdown ─────────► drop resize listener
 ## pi-statusline runtime
 
 ```
-session_start ──► applyEditor (session name on text-box top border)
-              └─► applyFooter  (model·effort, ctx, cost, git/PR footer)
+session_start ──► applyEditor (rounded box + bottom-right session name)
+              └─► applyFooter  (model·effort, ctx, cost, git/PR)
 
 turn_end / branch change ──► refresh git (+ PR via gh)
 /statusline usage on      ──► (opt-in) read auth + fetch provider quota, refresh every 5m
@@ -49,7 +49,7 @@ turn_end / branch change ──► refresh git (+ PR via gh)
 
 | Piece | Role |
 |-------|------|
-| **Editor border** | `CustomEditor` subclass draws the session name on the top border |
+| **Editor border** | `CustomEditor` subclass draws a rounded box, `›` prompt, and bottom-right session name |
 | **Footer** | `setFooter` renders `[model·effort] [ctx] [$cost] [usage] [git] [#pr]` |
 | **Git/PR** | `git status --porcelain=v2` + `gh pr view`, refreshed on turn end / branch change |
 | **Provider usage** | **Opt-in, off by default**: reads auth + calls provider API; Codex only |
