@@ -4,6 +4,8 @@ Custom **statusline** for [pi](https://github.com/earendil-works/pi): a rounded 
 
 Part of the [pi-extensions](https://github.com/smarzban/pi-extensions) monorepo.
 
+![pi-statusline screenshot](pi-statusline.png)
+
 ## Highlights
 
 - **Rounded text box** with `╭─╮`, `│ │`, and `╰─╯` corners plus a `›` prompt

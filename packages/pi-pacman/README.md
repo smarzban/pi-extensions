@@ -4,6 +4,8 @@ Pac-Man **working indicator** for [pi](https://github.com/earendil-works/pi): re
 
 Part of the [pi-extensions](https://github.com/smarzban/pi-extensions) monorepo.
 
+![Pac-Man working indicator](pac-man.gif)
+
 ## Highlights
 
 - **Drop-in working indicator**: uses `setWorkingIndicator` / `setWorkingMessage` (normal streaming only)
