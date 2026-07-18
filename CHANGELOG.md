@@ -17,6 +17,7 @@ Each package is versioned and released independently under `packages/<name>`, vi
 - Move the session name to the editor's bottom-right border.
 - Keep model/effort and the remaining runtime statistics in the footer.
 - Refresh the current branch's open PR after agent runs with a 30-second debounce (async, never blocks the UI), hiding merged or closed PRs.
+- Prevent a cached footer branch from appearing after the checkout becomes detached or the branch is removed.
 
 ## pi-statusline 0.1.1 (2026-07-18)
 

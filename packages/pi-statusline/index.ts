@@ -635,7 +635,9 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		// branch + staged(+) / unstaged(*) / untracked(?)
-		const branch = git?.branch || footerData?.getGitBranch() || null;
+		// A successful Git read with no branch (detached HEAD) must not fall back
+		// to footerData's cached branch, or a deleted/old branch can linger.
+		const branch = git !== null ? git.branch : footerData?.getGitBranch() || null;
 		let gitSeg = "";
 		if (branch) {
 			const dirty =
