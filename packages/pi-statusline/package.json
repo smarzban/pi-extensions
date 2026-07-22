@@ -1,6 +1,6 @@
 {
 	"name": "@pi-extensions/pi-statusline",
-	"version": "0.1.2",
+	"version": "0.1.3",
 	"description": "Custom pi footer: session name, model/effort, context, provider usage, git branch/PR/diff",
 	"type": "module",
 	"keywords": [

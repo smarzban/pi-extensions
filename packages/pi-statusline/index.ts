@@ -373,24 +373,20 @@ function readGit(cwd: string): GitState | null {
  * value), `null` = definitively no open PR (merged/closed/none — caller
  * clears the segment), number = open PR.
  */
-function readPrNumber(cwd: string): Promise<number | null | undefined> {
+function readPrNumber(cwd: string, branch: string): Promise<number | null | undefined> {
 	return new Promise((resolve) => {
 		execFile(
 			"gh",
-			["pr", "view", "--json", "number,state"],
+			["pr", "list", "--head", branch, "--state", "open", "--json", "number", "--limit", "1"],
 			{ cwd, encoding: "utf8", timeout: 5000 },
 			(error, stdout) => {
-				// `gh` exits non-zero both for "no PR for this branch" and for
-				// network/auth failures; treat both as "keep current value". A
-				// branch that never had a PR keeps prNumber === null anyway.
+				// `gh pr list` returns [] when this branch has no open PR, so a
+				// merged or closed PR is distinguishable from a failed lookup.
 				if (error) return resolve(undefined);
 				try {
-					const data = JSON.parse(stdout.trim()) as {
-						number?: unknown;
-						state?: unknown;
-					};
-					if (data.state !== "OPEN") return resolve(null);
-					const n = Number(data.number);
+					const data = JSON.parse(stdout.trim() || "[]") as Array<{ number?: unknown }>;
+					if (data.length === 0) return resolve(null);
+					const n = Number(data[0]?.number);
 					resolve(Number.isFinite(n) ? n : undefined);
 				} catch {
 					resolve(undefined);
@@ -450,7 +446,7 @@ export default function (pi: ExtensionAPI) {
 	let prBranch: string | null = null;
 	/** Last PR lookup, used to debounce the per-turn refresh. */
 	let lastPrLookupAt = 0;
-	/** True while an async `gh pr view` is running; prevents overlapping lookups. */
+	/** True while an async `gh pr list` is running; prevents overlapping lookups. */
 	let prLookupInFlight = false;
 	let latestUsage: UsageSnapshot | null = null;
 	let activeUsageKey: string | null = null;
@@ -506,7 +502,7 @@ export default function (pi: ExtensionAPI) {
 		tuiRef?.requestRender();
 	};
 
-	// PR lookup spawns `gh pr view` asynchronously (a GitHub API round-trip that must
+	// PR lookup spawns `gh pr list` asynchronously (a GitHub API round-trip that must
 	// never block the TUI). Check on turns, but debounce lookups so rapid-fire turns do
 	// not create a request for every turn, and never stack overlapping lookups. Branch
 	// changes and explicit refreshes always bypass the debounce. Merged/closed PRs
@@ -526,7 +522,7 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		prLookupInFlight = true;
-		readPrNumber(cwd)
+		readPrNumber(cwd, branch)
 			.then((n) => {
 				prLookupInFlight = false;
 				if ((git?.branch ?? null) !== branch) return; // branch moved on; discard
