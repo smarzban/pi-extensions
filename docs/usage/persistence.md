@@ -34,7 +34,7 @@ Example:
 
 ## When it writes
 
-On every `apply()`, including session start, look changes, rotate advances, and message updates. Failures to write are ignored (indicator still works).
+When a user command changes a setting, such as a look change, rotate toggle, or message update. Automatic UI re-application during session and agent start does not write the file, so external edits are not immediately overwritten. Failures to write are ignored (indicator still works).
 
 ## Migration
 
