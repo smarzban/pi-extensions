@@ -460,13 +460,13 @@ export default function (pi: ExtensionAPI) {
 		autoMessage = pickRandomMessage(autoMessage);
 	};
 
-	const apply = (ctx: ExtensionContext) => {
+	const apply = (ctx: ExtensionContext, save = false) => {
 		lastUi = ctx.ui;
 		const message = workingMessage();
 		ctx.ui.setWorkingIndicator(getIndicator(mode, message, cells));
 		ctx.ui.setWorkingMessage(message);
 		ctx.ui.setStatus("pacman-thinking", ctx.ui.theme.fg("dim", statusLabel()));
-		persist();
+		if (save) persist();
 	};
 
 	const isFullWidthMode = () => LOOK_BY_ID.get(mode)?.fullWidth === true;
@@ -550,7 +550,7 @@ export default function (pi: ExtensionAPI) {
 				const text = rest.join(" ").trim();
 				customMessage = text.length > 0 ? text : undefined;
 				if (!customMessage) refreshAutoMessage();
-				apply(ctx);
+				apply(ctx, true);
 				ctx.ui.notify(
 					customMessage
 						? `Working message locked to: ${customMessage}`
@@ -575,7 +575,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				cells = clampCells(n);
-				apply(ctx);
+				apply(ctx, true);
 				ctx.ui.notify(`Pac-Man short-look width: ${cells} cells`, "info");
 				return;
 			}
@@ -587,7 +587,7 @@ export default function (pi: ExtensionAPI) {
 				rotateIndex = idx >= 0 ? idx : 0;
 				pickNextRotatedLook();
 				refreshAutoMessage();
-				apply(ctx);
+				apply(ctx, true);
 				ctx.ui.notify(
 					`Pac-Man rotate on. Short looks only: ${ROTATE_LOOKS.join(", ")} (now: ${mode}).`,
 					"info",
@@ -599,7 +599,7 @@ export default function (pi: ExtensionAPI) {
 				rotate = false;
 				mode = "off";
 				ctx.ui.setWidget("pacman-looks", undefined);
-				apply(ctx);
+				apply(ctx, true);
 				ctx.ui.notify("Pac-Man indicator hidden", "info");
 				return;
 			}
@@ -613,7 +613,7 @@ export default function (pi: ExtensionAPI) {
 			rotate = false;
 			mode = head;
 			ctx.ui.setWidget("pacman-looks", undefined);
-			apply(ctx);
+			apply(ctx, true);
 			ctx.ui.notify(`Pac-Man indicator: ${describeMode(mode)}`, "info");
 		},
 	});
