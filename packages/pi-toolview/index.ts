@@ -33,12 +33,19 @@
 
 import {
 	createBashTool,
+	createBashToolDefinition,
 	createEditTool,
+	createEditToolDefinition,
 	createFindTool,
+	createFindToolDefinition,
 	createGrepTool,
+	createGrepToolDefinition,
 	createLsTool,
+	createLsToolDefinition,
 	createReadTool,
+	createReadToolDefinition,
 	createWriteTool,
+	createWriteToolDefinition,
 	type BashToolDetails,
 	type EditToolDetails,
 	type ExtensionAPI,
@@ -236,6 +243,19 @@ export default function (pi: ExtensionAPI) {
 		ls: createLsTool(cwd),
 	};
 
+	// renderCall/renderResult live on the tool DEFINITION, not on the AgentTool
+	// returned by createXTool (wrapToolDefinition drops them). Needed so the
+	// off-fallback can delegate to pi's native renderers.
+	const origDefs = {
+		bash: createBashToolDefinition(cwd),
+		read: createReadToolDefinition(cwd),
+		edit: createEditToolDefinition(cwd),
+		write: createWriteToolDefinition(cwd),
+		grep: createGrepToolDefinition(cwd),
+		find: createFindToolDefinition(cwd),
+		ls: createLsToolDefinition(cwd),
+	};
+
 	const state = loadState();
 	const isOn = (t: ToolName): boolean =>
 		state.enabled && state.tools[t] !== false;
@@ -281,7 +301,7 @@ export default function (pi: ExtensionAPI) {
 				state.endedAt = undefined;
 			}
 			if (!isOn("bash"))
-				return originals.bash.renderCall!(args, theme, context as any);
+				return origDefs.bash.renderCall!(args, theme, context as any);
 
 			const cmd = clipCommand(args.command, 76);
 			let t = `${theme.fg("toolTitle", theme.bold("$"))} ${theme.fg("accent", cmd)}`;
@@ -291,7 +311,7 @@ export default function (pi: ExtensionAPI) {
 
 		renderResult(result, opts, theme, context) {
 			if (!isOn("bash"))
-				return originals.bash.renderResult!(result, opts, theme, context as any);
+				return origDefs.bash.renderResult!(result, opts, theme, context as any);
 			if (opts.isPartial) return row(theme.fg("dim", "Running…"), theme, context, true);
 
 			const bstate = context.state as BashRenderState;
@@ -345,7 +365,7 @@ export default function (pi: ExtensionAPI) {
 
 		renderCall(args, theme, context) {
 			if (!isOn("read"))
-				return originals.read.renderCall!(args, theme, context as any);
+				return origDefs.read.renderCall!(args, theme, context as any);
 			let t = `${toolLabel(theme, true, "read")} ${theme.fg("accent", d(args.path))}`;
 			if (args.offset !== undefined || args.limit !== undefined) {
 				const bits: string[] = [];
@@ -358,7 +378,7 @@ export default function (pi: ExtensionAPI) {
 
 		renderResult(result, opts, theme, context) {
 			if (!isOn("read"))
-				return originals.read.renderResult!(result, opts, theme, context as any);
+				return origDefs.read.renderResult!(result, opts, theme, context as any);
 			if (opts.isPartial) return row(theme.fg("dim", "Reading…"), theme, context, true);
 
 			const details = result.details as ReadToolDetails | undefined;
@@ -406,7 +426,7 @@ export default function (pi: ExtensionAPI) {
 
 		renderCall(args, theme, context) {
 			if (!isOn("edit"))
-				return originals.edit.renderCall!(args, theme, context as any);
+				return origDefs.edit.renderCall!(args, theme, context as any);
 			const n = args.edits?.length ?? 1;
 			const t = `${toolLabel(theme, true, "edit")} ${theme.fg("accent", d(args.path))}${theme.fg("dim", ` (${n} change${n === 1 ? "" : "s"})`)}`;
 			return row(t, theme, context, context.isPartial);
@@ -414,7 +434,7 @@ export default function (pi: ExtensionAPI) {
 
 		renderResult(result, opts, theme, context) {
 			if (!isOn("edit"))
-				return originals.edit.renderResult!(result, opts, theme, context as any);
+				return origDefs.edit.renderResult!(result, opts, theme, context as any);
 			if (opts.isPartial) return row(theme.fg("dim", "Editing…"), theme, context, true);
 
 			const details = result.details as EditToolDetails | undefined;
@@ -468,7 +488,7 @@ export default function (pi: ExtensionAPI) {
 
 		renderCall(args, theme, context) {
 			if (!isOn("write"))
-				return originals.write.renderCall!(args, theme, context as any);
+				return origDefs.write.renderCall!(args, theme, context as any);
 			const lines = args.content.split("\n").length;
 			const size = new TextEncoder().encode(args.content).length;
 			const t = `${toolLabel(theme, true, "write")} ${theme.fg("accent", d(args.path))}${theme.fg("dim", ` (${lines} lines · ${formatBytes(size)})`)}`;
@@ -477,7 +497,7 @@ export default function (pi: ExtensionAPI) {
 
 		renderResult(result, opts, theme, context) {
 			if (!isOn("write"))
-				return originals.write.renderResult!(result, opts, theme, context as any);
+				return origDefs.write.renderResult!(result, opts, theme, context as any);
 			if (opts.isPartial) return row(theme.fg("dim", "Writing…"), theme, context, true);
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 			if (context.isError)
@@ -501,7 +521,7 @@ export default function (pi: ExtensionAPI) {
 
 		renderCall(args, theme, context) {
 			if (!isOn("grep"))
-				return originals.grep.renderCall!(args, theme, context as any);
+				return origDefs.grep.renderCall!(args, theme, context as any);
 			let t = `${toolLabel(theme, true, "grep")} ${theme.fg("accent", `/${args.pattern}/`)}`;
 			if (args.path) t += theme.fg("dim", ` in ${d(args.path)}`);
 			if (args.glob) t += theme.fg("dim", ` --glob=${args.glob}`);
@@ -510,7 +530,7 @@ export default function (pi: ExtensionAPI) {
 
 		renderResult(result, opts, theme, context) {
 			if (!isOn("grep"))
-				return originals.grep.renderResult!(result, opts, theme, context as any);
+				return origDefs.grep.renderResult!(result, opts, theme, context as any);
 			if (opts.isPartial) return row(theme.fg("dim", "Searching…"), theme, context, true);
 
 			const details = result.details as GrepToolDetails | undefined;
@@ -550,7 +570,7 @@ export default function (pi: ExtensionAPI) {
 
 		renderCall(args, theme, context) {
 			if (!isOn("find"))
-				return originals.find.renderCall!(args, theme, context as any);
+				return origDefs.find.renderCall!(args, theme, context as any);
 			let t = `${toolLabel(theme, true, "find")} ${theme.fg("accent", args.pattern)}`;
 			if (args.path) t += theme.fg("dim", ` in ${d(args.path)}`);
 			if (args.limit) t += theme.fg("dim", ` (limit ${args.limit})`);
@@ -559,7 +579,7 @@ export default function (pi: ExtensionAPI) {
 
 		renderResult(result, opts, theme, context) {
 			if (!isOn("find"))
-				return originals.find.renderResult!(result, opts, theme, context as any);
+				return origDefs.find.renderResult!(result, opts, theme, context as any);
 			if (opts.isPartial) return row(theme.fg("dim", "Searching…"), theme, context, true);
 
 			const details = result.details as FindToolDetails | undefined;
@@ -599,7 +619,7 @@ export default function (pi: ExtensionAPI) {
 
 		renderCall(args, theme, context) {
 			if (!isOn("ls"))
-				return originals.ls.renderCall!(args, theme, context as any);
+				return origDefs.ls.renderCall!(args, theme, context as any);
 			const target = args.path ? d(args.path) : ".";
 			let t = `${toolLabel(theme, true, "ls")} ${theme.fg("accent", target)}`;
 			if (args.limit) t += theme.fg("dim", ` (limit ${args.limit})`);
@@ -608,7 +628,7 @@ export default function (pi: ExtensionAPI) {
 
 		renderResult(result, opts, theme, context) {
 			if (!isOn("ls"))
-				return originals.ls.renderResult!(result, opts, theme, context as any);
+				return origDefs.ls.renderResult!(result, opts, theme, context as any);
 			if (opts.isPartial) return row(theme.fg("dim", "Listing…"), theme, context, true);
 
 			const details = result.details as LsToolDetails | undefined;
