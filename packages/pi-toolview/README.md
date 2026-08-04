@@ -94,8 +94,9 @@ Want to keep some tools at default? Use `/toolview bash off` to revert just bash
 - `renderShell: "self"` drops the default padded Box for a tighter look; the
   success/error/pending background color is re-applied manually. Pi hardcodes one
   blank line above every tool block, so a single separator remains.
-  With the self shell, turning a tool off renders the original content in the
-  tight frame rather than the native pill.
+- When a tool is toggled off, its full result content is drawn through the same
+  pill row. The native per-tool renderers are built for the Box shell and lose their
+  background in the tight self frame, so they are not delegated to.
 - `/toolview` toggles re-render already-drawn blocks immediately, no `/reload` needed
 - Only `renderCall()` and `renderResult()` are custom (TUI display only)
 - The LLM still receives full, unmodified `result.content`
