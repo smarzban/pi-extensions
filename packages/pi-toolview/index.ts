@@ -647,6 +647,7 @@ export default function (pi: ExtensionAPI) {
 
 			if (raw === "on") {
 				state.enabled = true;
+				state.tools = {};
 				saveState(state);
 				refresh();
 				ctx.ui.notify("toolview: all tools compact", "info");
@@ -654,6 +655,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			if (raw === "off") {
 				state.enabled = false;
+				state.tools = {};
 				saveState(state);
 				refresh();
 				ctx.ui.notify("toolview: all tools full output", "info");
