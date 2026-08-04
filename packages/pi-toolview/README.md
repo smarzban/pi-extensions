@@ -91,8 +91,11 @@ Want to keep some tools at default? Use `/toolview bash off` to revert just bash
 - Re-registers each built-in tool with the same name (pi uses the last registration)
 - `execute()` delegates to the original `create*Tool(cwd)` factory, behavior is identical
 - Bash timing uses the same `context.state` mechanism the built-in renderer uses
-- Uses the default tool Box shell, so background/padding match pi's native look and
-  turning toolview off restores the exact original rendering
+- `renderShell: "self"` drops the default padded Box for a tighter look; the
+  success/error/pending background color is re-applied manually. Pi hardcodes one
+  blank line above every tool block, so a single separator remains.
+  With the self shell, turning a tool off renders the original content in the
+  tight frame rather than the native pill.
 - `/toolview` toggles re-render already-drawn blocks immediately, no `/reload` needed
 - Only `renderCall()` and `renderResult()` are custom (TUI display only)
 - The LLM still receives full, unmodified `result.content`
