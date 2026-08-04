@@ -1,20 +1,25 @@
 /**
- * pi-compact-tools — compact tool output display
+ * pi-toolview — compact tool output display
  *
  * Replaces pi's verbose built-in tool rendering with one-line summaries,
  * expandable on demand (ctrl+o). Execution is fully delegated to the
  * originals, so the LLM still sees the complete output.
  *
+ * Uses renderShell: "self" to drop the default Box padding, then re-applies
+ * the success/error/pending background color manually, so blocks stay colored
+ * but sit tighter together. (pi hardcodes one blank line above every tool
+ * block, so a single separator line remains and cannot be removed here.)
+ *
  * Features:
  *   - Smart paths: relative to cwd inside project, ~/ under HOME, absolute otherwise
- *   - Bash timing: shows duration parsed from raw output
+ *   - Bash timing: measured via render state (same as built-in), not parsed from text
  *   - Write file size: byte count for sanity checks
- *   - Error emphasis: prominent ✗ prefix in red
+ *   - Error emphasis: prominent ✗ prefix in red, based on the isError flag
  *   - Edit context hint: shows the enclosing function/class from the diff
- *   - /compact command: toggle on/off globally or per-tool
+ *   - /toolview command: toggle on/off globally or per-tool, persisted
  *
  * Install:
- *   pi install /path/to/pi-extensions/packages/pi-compact-tools
+ *   pi install /path/to/pi-extensions/packages/pi-toolview
  *
  * Commands:
  *   /toolview              Show status
@@ -80,7 +85,8 @@ function formatDuration(ms: number): string {
 }
 
 /**
- * Strip metadata lines appended by pi (timing, exit code, truncation notice).
+ * Strip metadata pi appends to bash output: truncation notices and exit/abort
+ * status lines. Timing is NOT in the text; it comes from render state.
  */
 function stripBashMeta(output: string): string {
 	return output
@@ -237,8 +243,17 @@ export default function (pi: ExtensionAPI) {
 	// Themed helpers
 	const toolLabel = (theme: any, on: boolean, label: string) =>
 		on ? theme.fg("toolTitle", theme.bold(label)) : theme.fg("muted", label);
-	const dimOrMuted = (theme: any, on: boolean, text: string) =>
-		on ? theme.fg("dim", text) : theme.fg("muted", theme.fg("dim", text));
+
+	// renderShell: "self" drops the default Box, so we re-apply the pill
+	// background ourselves. One colored row, tight vertical padding.
+	const row = (text: string, theme: any, context: any, partial: boolean): Text => {
+		const bg = partial
+			? (s: string) => theme.bg("toolPendingBg", s)
+			: context.isError
+				? (s: string) => theme.bg("toolErrorBg", s)
+				: (s: string) => theme.bg("toolSuccessBg", s);
+		return new Text(text, 1, 0, bg);
+	};
 
 	// ── bash ────────────────────────────────────────────────────────
 
@@ -250,6 +265,7 @@ export default function (pi: ExtensionAPI) {
 		label: "bash",
 		description: originals.bash.description,
 		parameters: originals.bash.parameters,
+		renderShell: "self",
 
 		async execute(id, params, signal, onUpdate) {
 			return originals.bash.execute(id, params, signal, onUpdate);
@@ -266,21 +282,21 @@ export default function (pi: ExtensionAPI) {
 				return originals.bash.renderCall!(args, theme, context as any);
 
 			const cmd = clipCommand(args.command, 76);
-			let t = `${toolLabel(theme, true, "$")} ${theme.fg("accent", cmd)}`;
+			let t = `${theme.fg("toolTitle", theme.bold("$"))} ${theme.fg("accent", cmd)}`;
 			if (args.timeout) t += theme.fg("dim", ` (${args.timeout}s)`);
-			return new Text(t, 0, 0);
+			return row(t, theme, context, context.isPartial);
 		},
 
 		renderResult(result, opts, theme, context) {
 			if (!isOn("bash"))
 				return originals.bash.renderResult!(result, opts, theme, context as any);
-			if (opts.isPartial) return new Text(theme.fg("dim", "Running…"), 0, 0);
+			if (opts.isPartial) return row(theme.fg("dim", "Running…"), theme, context, true);
 
-			const state = context.state as BashRenderState;
-			if (state.startedAt !== undefined) state.endedAt ??= Date.now();
+			const bstate = context.state as BashRenderState;
+			if (bstate.startedAt !== undefined) bstate.endedAt ??= Date.now();
 			const durationMs =
-				state.startedAt !== undefined
-					? (state.endedAt ?? Date.now()) - state.startedAt
+				bstate.startedAt !== undefined
+					? (bstate.endedAt ?? Date.now()) - bstate.startedAt
 					: undefined;
 
 			const details = result.details as BashToolDetails | undefined;
@@ -308,7 +324,7 @@ export default function (pi: ExtensionAPI) {
 				if (total > 30)
 					t += `\n${theme.fg("muted", `… ${total - 30} more lines`)}`;
 			}
-			return new Text(t, 0, 0);
+			return row(t, theme, context, false);
 		},
 	});
 
@@ -319,27 +335,29 @@ export default function (pi: ExtensionAPI) {
 		label: "read",
 		description: originals.read.description,
 		parameters: originals.read.parameters,
+		renderShell: "self",
 
 		async execute(id, params, signal, onUpdate) {
 			return originals.read.execute(id, params, signal, onUpdate);
 		},
 
-		renderCall(args, theme) {
-			const on = isOn("read");
-			let t = `${toolLabel(theme, on, "read")} ${theme.fg("accent", d(args.path))}`;
+		renderCall(args, theme, context) {
+			if (!isOn("read"))
+				return originals.read.renderCall!(args, theme, context as any);
+			let t = `${toolLabel(theme, true, "read")} ${theme.fg("accent", d(args.path))}`;
 			if (args.offset !== undefined || args.limit !== undefined) {
 				const bits: string[] = [];
 				if (args.offset) bits.push(`offset=${args.offset}`);
 				if (args.limit) bits.push(`limit=${args.limit}`);
-				t += dimOrMuted(theme, on, ` (${bits.join(", ")})`);
+				t += theme.fg("dim", ` (${bits.join(", ")})`);
 			}
-			return new Text(t, 0, 0);
+			return row(t, theme, context, context.isPartial);
 		},
 
 		renderResult(result, opts, theme, context) {
 			if (!isOn("read"))
 				return originals.read.renderResult!(result, opts, theme, context as any);
-			if (opts.isPartial) return new Text(theme.fg("dim", "Reading…"), 0, 0);
+			if (opts.isPartial) return row(theme.fg("dim", "Reading…"), theme, context, true);
 
 			const details = result.details as ReadToolDetails | undefined;
 			const content = result.content[0];
@@ -347,14 +365,14 @@ export default function (pi: ExtensionAPI) {
 			if (context.isError) {
 				const firstLine =
 					content?.type === "text" ? content.text.split("\n")[0] : "Read failed";
-				return new Text(theme.fg("error", `✗ ${firstLine}`), 0, 0);
+				return row(theme.fg("error", `✗ ${firstLine}`), theme, context, false);
 			}
 
 			if (content?.type === "image")
-				return new Text(theme.fg("success", "Image loaded"), 0, 0);
+				return row(theme.fg("success", "Image loaded"), theme, context, false);
 
 			if (content?.type !== "text")
-				return new Text(theme.fg("error", "✗ No content"), 0, 0);
+				return row(theme.fg("error", "✗ No content"), theme, context, false);
 
 			const lines = content.text.split("\n").length;
 			let t = theme.fg("success", `${lines} line${lines === 1 ? "" : "s"}`);
@@ -367,7 +385,7 @@ export default function (pi: ExtensionAPI) {
 				if (lines > 20)
 					t += `\n${theme.fg("muted", `… ${lines - 20} more lines`)}`;
 			}
-			return new Text(t, 0, 0);
+			return row(t, theme, context, false);
 		},
 	});
 
@@ -378,33 +396,32 @@ export default function (pi: ExtensionAPI) {
 		label: "edit",
 		description: originals.edit.description,
 		parameters: originals.edit.parameters,
+		renderShell: "self",
 
 		async execute(id, params, signal, onUpdate) {
 			return originals.edit.execute(id, params, signal, onUpdate);
 		},
 
-		renderCall(args, theme) {
-			const on = isOn("edit");
+		renderCall(args, theme, context) {
+			if (!isOn("edit"))
+				return originals.edit.renderCall!(args, theme, context as any);
 			const n = args.edits?.length ?? 1;
-			return new Text(
-				`${toolLabel(theme, on, "edit")} ${theme.fg("accent", d(args.path))}${dimOrMuted(theme, on, ` (${n} change${n === 1 ? "" : "s"})`)}`,
-				0,
-				0,
-			);
+			const t = `${toolLabel(theme, true, "edit")} ${theme.fg("accent", d(args.path))}${theme.fg("dim", ` (${n} change${n === 1 ? "" : "s"})`)}`;
+			return row(t, theme, context, context.isPartial);
 		},
 
 		renderResult(result, opts, theme, context) {
 			if (!isOn("edit"))
 				return originals.edit.renderResult!(result, opts, theme, context as any);
-			if (opts.isPartial) return new Text(theme.fg("dim", "Editing…"), 0, 0);
+			if (opts.isPartial) return row(theme.fg("dim", "Editing…"), theme, context, true);
 
 			const details = result.details as EditToolDetails | undefined;
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 			if (context.isError)
-				return new Text(theme.fg("error", `✗ ${text.split("\n")[0] || "Edit failed"}`), 0, 0);
+				return row(theme.fg("error", `✗ ${text.split("\n")[0] || "Edit failed"}`), theme, context, false);
 
 			if (!details?.diff)
-				return new Text(theme.fg("success", "Applied"), 0, 0);
+				return row(theme.fg("success", "Applied"), theme, context, false);
 
 			const { add, rem } = diffStats(details.diff);
 			const funcHint = extractFuncHint(details.diff, details.patch);
@@ -430,7 +447,7 @@ export default function (pi: ExtensionAPI) {
 				if (total > 40)
 					t += `\n${theme.fg("muted", `… ${total - 40} more diff lines`)}`;
 			}
-			return new Text(t, 0, 0);
+			return row(t, theme, context, false);
 		},
 	});
 
@@ -441,30 +458,29 @@ export default function (pi: ExtensionAPI) {
 		label: "write",
 		description: originals.write.description,
 		parameters: originals.write.parameters,
+		renderShell: "self",
 
 		async execute(id, params, signal, onUpdate) {
 			return originals.write.execute(id, params, signal, onUpdate);
 		},
 
-		renderCall(args, theme) {
-			const on = isOn("write");
+		renderCall(args, theme, context) {
+			if (!isOn("write"))
+				return originals.write.renderCall!(args, theme, context as any);
 			const lines = args.content.split("\n").length;
 			const size = new TextEncoder().encode(args.content).length;
-			return new Text(
-				`${toolLabel(theme, on, "write")} ${theme.fg("accent", d(args.path))}${dimOrMuted(theme, on, ` (${lines} lines · ${formatBytes(size)})`)}`,
-				0,
-				0,
-			);
+			const t = `${toolLabel(theme, true, "write")} ${theme.fg("accent", d(args.path))}${theme.fg("dim", ` (${lines} lines · ${formatBytes(size)})`)}`;
+			return row(t, theme, context, context.isPartial);
 		},
 
 		renderResult(result, opts, theme, context) {
 			if (!isOn("write"))
 				return originals.write.renderResult!(result, opts, theme, context as any);
-			if (opts.isPartial) return new Text(theme.fg("dim", "Writing…"), 0, 0);
+			if (opts.isPartial) return row(theme.fg("dim", "Writing…"), theme, context, true);
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 			if (context.isError)
-				return new Text(theme.fg("error", `✗ ${text.split("\n")[0] || "Write failed"}`), 0, 0);
-			return new Text(theme.fg("success", "Written"), 0, 0);
+				return row(theme.fg("error", `✗ ${text.split("\n")[0] || "Write failed"}`), theme, context, false);
+			return row(theme.fg("success", "Written"), theme, context, false);
 		},
 	});
 
@@ -475,29 +491,31 @@ export default function (pi: ExtensionAPI) {
 		label: "grep",
 		description: originals.grep.description,
 		parameters: originals.grep.parameters,
+		renderShell: "self",
 
 		async execute(id, params, signal, onUpdate) {
 			return originals.grep.execute(id, params, signal, onUpdate);
 		},
 
-		renderCall(args, theme) {
-			const on = isOn("grep");
-			let t = `${toolLabel(theme, on, "grep")} ${theme.fg("accent", `/${args.pattern}/`)}`;
-			if (args.path) t += dimOrMuted(theme, on, ` in ${d(args.path)}`);
-			if (args.glob) t += dimOrMuted(theme, on, ` --glob=${args.glob}`);
-			return new Text(t, 0, 0);
+		renderCall(args, theme, context) {
+			if (!isOn("grep"))
+				return originals.grep.renderCall!(args, theme, context as any);
+			let t = `${toolLabel(theme, true, "grep")} ${theme.fg("accent", `/${args.pattern}/`)}`;
+			if (args.path) t += theme.fg("dim", ` in ${d(args.path)}`);
+			if (args.glob) t += theme.fg("dim", ` --glob=${args.glob}`);
+			return row(t, theme, context, context.isPartial);
 		},
 
 		renderResult(result, opts, theme, context) {
 			if (!isOn("grep"))
 				return originals.grep.renderResult!(result, opts, theme, context as any);
-			if (opts.isPartial) return new Text(theme.fg("dim", "Searching…"), 0, 0);
+			if (opts.isPartial) return row(theme.fg("dim", "Searching…"), theme, context, true);
 
 			const details = result.details as GrepToolDetails | undefined;
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 
 			if (text.startsWith("No matches"))
-				return new Text(theme.fg("muted", "0 matches"), 0, 0);
+				return row(theme.fg("muted", "0 matches"), theme, context, false);
 
 			const matches = lineCount(text);
 			let t = theme.fg("success", `${matches} match${matches === 1 ? "" : "es"}`);
@@ -511,7 +529,7 @@ export default function (pi: ExtensionAPI) {
 				if (matches > 20)
 					t += `\n${theme.fg("muted", `… ${matches - 20} more matches`)}`;
 			}
-			return new Text(t, 0, 0);
+			return row(t, theme, context, false);
 		},
 	});
 
@@ -522,32 +540,33 @@ export default function (pi: ExtensionAPI) {
 		label: "find",
 		description: originals.find.description,
 		parameters: originals.find.parameters,
+		renderShell: "self",
 
 		async execute(id, params, signal, onUpdate) {
 			return originals.find.execute(id, params, signal, onUpdate);
 		},
 
-		renderCall(args, theme) {
-			const on = isOn("find");
-			let t = `${toolLabel(theme, on, "find")} ${theme.fg("accent", args.pattern)}`;
-			if (args.path) t += dimOrMuted(theme, on, ` in ${d(args.path)}`);
-			if (args.limit) t += dimOrMuted(theme, on, ` (limit ${args.limit})`);
-			return new Text(t, 0, 0);
+		renderCall(args, theme, context) {
+			if (!isOn("find"))
+				return originals.find.renderCall!(args, theme, context as any);
+			let t = `${toolLabel(theme, true, "find")} ${theme.fg("accent", args.pattern)}`;
+			if (args.path) t += theme.fg("dim", ` in ${d(args.path)}`);
+			if (args.limit) t += theme.fg("dim", ` (limit ${args.limit})`);
+			return row(t, theme, context, context.isPartial);
 		},
 
 		renderResult(result, opts, theme, context) {
 			if (!isOn("find"))
 				return originals.find.renderResult!(result, opts, theme, context as any);
-			if (opts.isPartial) return new Text(theme.fg("dim", "Searching…"), 0, 0);
+			if (opts.isPartial) return row(theme.fg("dim", "Searching…"), theme, context, true);
 
 			const details = result.details as FindToolDetails | undefined;
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 
 			if (text.startsWith("No files"))
-				return new Text(theme.fg("muted", "0 results"), 0, 0);
+				return row(theme.fg("muted", "0 results"), theme, context, false);
 
 			const count = lineCount(text);
-
 			let t = theme.fg("success", `${count} result${count === 1 ? "" : "s"}`);
 			if (details?.resultLimitReached)
 				t += theme.fg("warning", ` (limit ${details.resultLimitReached})`);
@@ -559,7 +578,7 @@ export default function (pi: ExtensionAPI) {
 				if (count > 20)
 					t += `\n${theme.fg("muted", `… ${count - 20} more results`)}`;
 			}
-			return new Text(t, 0, 0);
+			return row(t, theme, context, false);
 		},
 	});
 
@@ -570,23 +589,25 @@ export default function (pi: ExtensionAPI) {
 		label: "ls",
 		description: originals.ls.description,
 		parameters: originals.ls.parameters,
+		renderShell: "self",
 
 		async execute(id, params, signal, onUpdate) {
 			return originals.ls.execute(id, params, signal, onUpdate);
 		},
 
-		renderCall(args, theme) {
-			const on = isOn("ls");
+		renderCall(args, theme, context) {
+			if (!isOn("ls"))
+				return originals.ls.renderCall!(args, theme, context as any);
 			const target = args.path ? d(args.path) : ".";
-			let t = `${toolLabel(theme, on, "ls")} ${theme.fg("accent", target)}`;
-			if (args.limit) t += dimOrMuted(theme, on, ` (limit ${args.limit})`);
-			return new Text(t, 0, 0);
+			let t = `${toolLabel(theme, true, "ls")} ${theme.fg("accent", target)}`;
+			if (args.limit) t += theme.fg("dim", ` (limit ${args.limit})`);
+			return row(t, theme, context, context.isPartial);
 		},
 
 		renderResult(result, opts, theme, context) {
 			if (!isOn("ls"))
 				return originals.ls.renderResult!(result, opts, theme, context as any);
-			if (opts.isPartial) return new Text(theme.fg("dim", "Listing…"), 0, 0);
+			if (opts.isPartial) return row(theme.fg("dim", "Listing…"), theme, context, true);
 
 			const details = result.details as LsToolDetails | undefined;
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
@@ -603,7 +624,7 @@ export default function (pi: ExtensionAPI) {
 				if (count > 20)
 					t += `\n${theme.fg("muted", `… ${count - 20} more entries`)}`;
 			}
-			return new Text(t, 0, 0);
+			return row(t, theme, context, false);
 		},
 	});
 
@@ -640,7 +661,7 @@ export default function (pi: ExtensionAPI) {
 
 			const parts = raw.split(/\s+/);
 
-			// /compact <tool> on|off
+			// /toolview <tool> on|off
 			if (parts.length === 2) {
 				const tool = parts[0] as ToolName;
 				const action = parts[1];
