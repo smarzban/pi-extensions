@@ -25,10 +25,10 @@
  *
  * Commands:
  *   /toolview              Show status
- *   /toolview off          Disable all compact rendering (full output)
- *   /toolview on           Enable all compact rendering
- *   /toolview <tool> off   One tool back to full output (bash/read/edit/write/grep/find/ls)
- *   /toolview <tool> on    Re-enable compact for that tool
+ *   /toolview compact      All tools compact (summaries)
+ *   /toolview full         All tools full output
+ *   /toolview <tool> [compact|full]   One tool
+ *   (on/off accepted as aliases for compact/full)
  */
 
 import {
@@ -623,7 +623,8 @@ export default function (pi: ExtensionAPI) {
 	// ── /toolview command ───────────────────────────────────────────
 
 	pi.registerCommand("toolview", {
-		description: "Toggle compact tool output. /toolview off · /toolview bash off",
+		description:
+			"Compact vs full tool output. /toolview compact · /toolview bash full",
 		handler: async (args, ctx) => {
 			// Re-render already-drawn tool blocks so a toggle applies immediately.
 			const refresh = () => {
@@ -633,19 +634,21 @@ export default function (pi: ExtensionAPI) {
 					// non-fatal: toggle still applies to newly-rendered tools
 				}
 			};
+			// Accept "compact"/"full" as primary, "on"/"off" as legacy aliases.
+			const norm = (a: string) => (a === "on" ? "compact" : a === "off" ? "full" : a);
 			const raw = args.trim().toLowerCase();
 
 			if (!raw) {
-				const status = state.enabled ? "on" : "off";
+				const status = state.enabled ? "compact" : "full";
 				const perTool = TOOL_NAMES.map((t) => {
 					const on = state.tools[t] !== false;
-					return on ? t : `${t}(off)`;
+					return on ? t : `${t}(full)`;
 				}).join(", ");
 				ctx.ui.notify(`toolview: ${status} — ${perTool}`, "info");
 				return;
 			}
 
-			if (raw === "on") {
+			if (norm(raw) === "compact") {
 				state.enabled = true;
 				state.tools = {};
 				saveState(state);
@@ -653,7 +656,7 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify("toolview: all tools compact", "info");
 				return;
 			}
-			if (raw === "off") {
+			if (norm(raw) === "full") {
 				state.enabled = false;
 				state.tools = {};
 				saveState(state);
@@ -666,7 +669,7 @@ export default function (pi: ExtensionAPI) {
 
 			if (parts.length === 2) {
 				const tool = parts[0] as ToolName;
-				const action = parts[1];
+				const action = norm(parts[1]);
 				if (!TOOL_NAMES.includes(tool)) {
 					ctx.ui.notify(
 						`toolview: unknown tool "${tool}". Tools: ${TOOL_NAMES.join(", ")}`,
@@ -674,18 +677,15 @@ export default function (pi: ExtensionAPI) {
 					);
 					return;
 				}
-				if (action === "on") {
-					delete state.tools[tool];
+				if (action === "compact" || action === "full") {
+					if (action === "compact") {
+						delete state.tools[tool];
+					} else {
+						state.tools[tool] = false;
+					}
 					saveState(state);
 					refresh();
-					ctx.ui.notify(`toolview: ${tool} → compact`, "info");
-					return;
-				}
-				if (action === "off") {
-					state.tools[tool] = false;
-					saveState(state);
-					refresh();
-					ctx.ui.notify(`toolview: ${tool} → full output`, "info");
+					ctx.ui.notify(`toolview: ${tool} → ${action}`, "info");
 					return;
 				}
 			}
@@ -695,7 +695,7 @@ export default function (pi: ExtensionAPI) {
 				if (!TOOL_NAMES.includes(tool)) {
 					ctx.ui.notify(
 						`toolview: unknown tool "${tool}". Tools: ${TOOL_NAMES.join(", ")}`,
-						"error",
+					"error",
 					);
 					return;
 				}
@@ -708,14 +708,14 @@ export default function (pi: ExtensionAPI) {
 				saveState(state);
 				refresh();
 				ctx.ui.notify(
-					`toolview: ${tool} → ${currentlyOn ? "full output" : "compact"}`,
+					`toolview: ${tool} → ${currentlyOn ? "full" : "compact"}`,
 					"info",
 				);
 				return;
 			}
 
 			ctx.ui.notify(
-				"Usage: /toolview [on|off] · /toolview <tool> [on|off] · /toolview (status)",
+				"Usage: /toolview [compact|full] · /toolview <tool> [compact|full] · /toolview (status)",
 				"info",
 			);
 		},

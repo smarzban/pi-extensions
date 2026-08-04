@@ -53,18 +53,20 @@ pi install /path/to/pi-extensions/packages/pi-toolview
 | **Write file size** | `(156 lines · 4.2 KB)` — catch accidental huge writes |
 | **Error emphasis** | `✗ exit 1` in red, based on the tool's isError flag |
 | **Edit context hint** | `+12 / -4 in parseConfig` — enclosing function from diff |
-| **Per-tool control** | `/toolview bash off` — that tool reverts to verbose original |
+| **Per-tool control** | `/toolview bash full` — that tool shows full output |
 
 ## Commands
 
 | Command | Effect |
 |---------|--------|
 | `/toolview` | Show current status |
-| `/toolview off` | All tools back to verbose (original rendering) |
-| `/toolview on` | Re-enable compact for all tools |
+| `/toolview compact` | All tools compact (summaries) |
+| `/toolview full` | All tools full output |
 | `/toolview <tool>` | Toggle one tool (e.g. `/toolview bash`) |
-| `/toolview <tool> off` | One tool back to verbose |
-| `/toolview <tool> on` | Re-enable compact for one tool |
+| `/toolview <tool> compact` | One tool compact |
+| `/toolview <tool> full` | One tool full output |
+
+`on`/`off` are accepted as aliases for `compact`/`full`.
 
 Tools: `bash`, `read`, `edit`, `write`, `grep`, `find`, `ls`
 
@@ -84,7 +86,7 @@ State persists in `~/.pi/agent/toolview.json`.
 
 ## Partial override
 
-Want to keep some tools at default? Use `/toolview bash off` to revert just bash to pi's original verbose rendering. Or copy `index.ts` and delete the `pi.registerTool()` block for any tool.
+Want to keep some tools at default? Use `/toolview bash full` to show full output for just bash. Or copy `index.ts` and delete the `pi.registerTool()` block for any tool.
 
 ## How it works
 
