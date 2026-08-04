@@ -5,10 +5,10 @@
  * expandable on demand (ctrl+o). Execution is fully delegated to the
  * originals, so the LLM still sees the complete output.
  *
- * Uses renderShell: "self" to drop the default Box padding, then re-applies
- * the success/error/pending background color manually, so blocks stay colored
- * but sit tighter together. (pi hardcodes one blank line above every tool
- * block, so a single separator line remains and cannot be removed here.)
+ * Uses the default tool Box shell so the success/error/pending background and
+ * padding match pi's native look. This also means turning toolview off restores
+ * the exact original rendering. Toggling re-renders existing blocks via
+ * ctx.ui.setToolsExpanded so no /reload is needed.
  *
  * Features:
  *   - Smart paths: relative to cwd inside project, ~/ under HOME, absolute otherwise
@@ -244,16 +244,10 @@ export default function (pi: ExtensionAPI) {
 	const toolLabel = (theme: any, on: boolean, label: string) =>
 		on ? theme.fg("toolTitle", theme.bold(label)) : theme.fg("muted", label);
 
-	// renderShell: "self" drops the default Box, so we re-apply the pill
-	// background ourselves. One colored row, tight vertical padding.
-	const row = (text: string, theme: any, context: any, partial: boolean): Text => {
-		const bg = partial
-			? (s: string) => theme.bg("toolPendingBg", s)
-			: context.isError
-				? (s: string) => theme.bg("toolErrorBg", s)
-				: (s: string) => theme.bg("toolSuccessBg", s);
-		return new Text(text, 1, 0, bg);
-	};
+	// Default tool Box shell supplies the background color and padding, so a
+	// plain zero-padded Text is all each row needs.
+	const row = (text: string, _theme?: any, _context?: any, _partial?: boolean): Text =>
+		new Text(text, 0, 0);
 
 	// ── bash ────────────────────────────────────────────────────────
 
@@ -265,7 +259,6 @@ export default function (pi: ExtensionAPI) {
 		label: "bash",
 		description: originals.bash.description,
 		parameters: originals.bash.parameters,
-		renderShell: "self",
 
 		async execute(id, params, signal, onUpdate) {
 			return originals.bash.execute(id, params, signal, onUpdate);
@@ -335,7 +328,6 @@ export default function (pi: ExtensionAPI) {
 		label: "read",
 		description: originals.read.description,
 		parameters: originals.read.parameters,
-		renderShell: "self",
 
 		async execute(id, params, signal, onUpdate) {
 			return originals.read.execute(id, params, signal, onUpdate);
@@ -396,7 +388,6 @@ export default function (pi: ExtensionAPI) {
 		label: "edit",
 		description: originals.edit.description,
 		parameters: originals.edit.parameters,
-		renderShell: "self",
 
 		async execute(id, params, signal, onUpdate) {
 			return originals.edit.execute(id, params, signal, onUpdate);
@@ -458,7 +449,6 @@ export default function (pi: ExtensionAPI) {
 		label: "write",
 		description: originals.write.description,
 		parameters: originals.write.parameters,
-		renderShell: "self",
 
 		async execute(id, params, signal, onUpdate) {
 			return originals.write.execute(id, params, signal, onUpdate);
@@ -491,7 +481,6 @@ export default function (pi: ExtensionAPI) {
 		label: "grep",
 		description: originals.grep.description,
 		parameters: originals.grep.parameters,
-		renderShell: "self",
 
 		async execute(id, params, signal, onUpdate) {
 			return originals.grep.execute(id, params, signal, onUpdate);
@@ -540,7 +529,6 @@ export default function (pi: ExtensionAPI) {
 		label: "find",
 		description: originals.find.description,
 		parameters: originals.find.parameters,
-		renderShell: "self",
 
 		async execute(id, params, signal, onUpdate) {
 			return originals.find.execute(id, params, signal, onUpdate);
@@ -589,7 +577,6 @@ export default function (pi: ExtensionAPI) {
 		label: "ls",
 		description: originals.ls.description,
 		parameters: originals.ls.parameters,
-		renderShell: "self",
 
 		async execute(id, params, signal, onUpdate) {
 			return originals.ls.execute(id, params, signal, onUpdate);
@@ -633,6 +620,16 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("toolview", {
 		description: "Toggle compact tool output. /toolview off · /toolview bash off",
 		handler: async (args, ctx) => {
+			// Re-render already-drawn tool blocks so a toggle applies immediately,
+			// no /reload needed. setToolsExpanded re-runs renderCall/renderResult
+			// on every block; passing the current value changes nothing visually.
+			const refresh = () => {
+				try {
+					ctx.ui.setToolsExpanded(ctx.ui.getToolsExpanded());
+				} catch {
+					// non-fatal: toggle still applies to newly-rendered tools
+				}
+			};
 			const raw = args.trim().toLowerCase();
 
 			if (!raw) {
@@ -649,12 +646,14 @@ export default function (pi: ExtensionAPI) {
 			if (raw === "on") {
 				state.enabled = true;
 				saveState(state);
+				refresh();
 				ctx.ui.notify("toolview: all tools compact", "info");
 				return;
 			}
 			if (raw === "off") {
 				state.enabled = false;
 				saveState(state);
+				refresh();
 				ctx.ui.notify("toolview: all tools verbose (original)", "info");
 				return;
 			}
@@ -675,12 +674,14 @@ export default function (pi: ExtensionAPI) {
 				if (action === "on") {
 					delete state.tools[tool];
 					saveState(state);
+					refresh();
 					ctx.ui.notify(`toolview: ${tool} → compact`, "info");
 					return;
 				}
 				if (action === "off") {
 					state.tools[tool] = false;
 					saveState(state);
+					refresh();
 					ctx.ui.notify(`toolview: ${tool} → verbose (original)`, "info");
 					return;
 				}
@@ -703,6 +704,7 @@ export default function (pi: ExtensionAPI) {
 					delete state.tools[tool];
 				}
 				saveState(state);
+				refresh();
 				ctx.ui.notify(
 					`toolview: ${tool} → ${currentlyOn ? "verbose" : "compact"}`,
 					"info",
