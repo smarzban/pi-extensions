@@ -72,10 +72,11 @@ function formatBytes(n: number): string {
 	return mb < 10 ? `${mb.toFixed(1)} MB` : `${Math.round(mb)} MB`;
 }
 
-/** Extract "Took X.Xs" timing from bash output metadata. */
-function extractTiming(output: string): string | null {
-	const m = output.match(/\[?Took (\d+\.?\d*)s\]?/);
-	return m ? `${m[1]}s` : null;
+/** Human-readable duration. */
+function formatDuration(ms: number): string {
+	if (ms < 1000) return `${ms}ms`;
+	const s = ms / 1000;
+	return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
 }
 
 /**
@@ -83,9 +84,9 @@ function extractTiming(output: string): string | null {
  */
 function stripBashMeta(output: string): string {
 	return output
-		.replace(/\n\[Took \d+\.\d+s\]\s*$/g, "")
-		.replace(/\nexit code: \d+\s*$/g, "")
-		.replace(/\n\[Output truncated:[^\]]*\]\s*$/g, "")
+		.replace(/\n\n\[Showing lines [^\]]*\]\s*$/g, "")
+		.replace(/\n\n\[Showing last [^\]]*\]\s*$/g, "")
+		.replace(/\n\nCommand (exited with code \d+|aborted|timed out after [^\n]*)\s*$/g, "")
 		.trimEnd();
 }
 
@@ -93,6 +94,18 @@ function stripBashMeta(output: string): string {
 function clip(text: string, maxLen: number): string {
 	const flat = text.replace(/\n/g, " ").trim();
 	return flat.length <= maxLen ? flat : `${flat.slice(0, maxLen - 1)}…`;
+}
+
+/**
+ * Truncate long commands keeping head + tail. The tail usually holds the
+ * actual command when the head is a long env assignment or `cd /long/path &&`.
+ */
+function clipCommand(text: string, maxLen: number): string {
+	const flat = text.replace(/\n/g, " ").trim();
+	if (flat.length <= maxLen) return flat;
+	const head = Math.floor(maxLen * 0.3);
+	const tail = maxLen - head - 1;
+	return `${flat.slice(0, head)}…${flat.slice(flat.length - tail)}`;
 }
 
 /** Count +/- lines in a diff. */
@@ -229,6 +242,9 @@ export default function (pi: ExtensionAPI) {
 
 	// ── bash ────────────────────────────────────────────────────────
 
+	// Timing lives in shared render state, same mechanism the built-in uses.
+	type BashRenderState = { startedAt?: number; endedAt?: number };
+
 	pi.registerTool({
 		name: "bash",
 		label: "bash",
@@ -239,43 +255,50 @@ export default function (pi: ExtensionAPI) {
 			return originals.bash.execute(id, params, signal, onUpdate);
 		},
 
-		renderCall(args, theme) {
-			const on = isOn("bash");
-			const cmd = clip(args.command, 72);
-			let t = `${toolLabel(theme, on, "$")} ${theme.fg("accent", cmd)}`;
-			if (args.timeout) t += dimOrMuted(theme, on, ` (${args.timeout}s)`);
+		renderCall(args, theme, context) {
+			// Track start time regardless of on/off so toggling keeps timing intact
+			const state = context.state as BashRenderState;
+			if (context.executionStarted && state.startedAt === undefined) {
+				state.startedAt = Date.now();
+				state.endedAt = undefined;
+			}
+			if (!isOn("bash"))
+				return originals.bash.renderCall!(args, theme, context as any);
+
+			const cmd = clipCommand(args.command, 76);
+			let t = `${toolLabel(theme, true, "$")} ${theme.fg("accent", cmd)}`;
+			if (args.timeout) t += theme.fg("dim", ` (${args.timeout}s)`);
 			return new Text(t, 0, 0);
 		},
 
-		renderResult(result, opts, theme) {
+		renderResult(result, opts, theme, context) {
 			if (!isOn("bash"))
-				return originals.bash.renderResult!(result, opts, theme, {} as any);
+				return originals.bash.renderResult!(result, opts, theme, context as any);
 			if (opts.isPartial) return new Text(theme.fg("dim", "Running…"), 0, 0);
+
+			const state = context.state as BashRenderState;
+			if (state.startedAt !== undefined) state.endedAt ??= Date.now();
+			const durationMs =
+				state.startedAt !== undefined
+					? (state.endedAt ?? Date.now()) - state.startedAt
+					: undefined;
 
 			const details = result.details as BashToolDetails | undefined;
 			const raw = result.content[0]?.type === "text" ? result.content[0].text : "";
-			const timing = extractTiming(raw);
 			const clean = stripBashMeta(raw);
 			const lines = lineCount(clean);
 
-			// Error detection: explicit exit code, or "error" / "not found" in first few lines
-			const exitMatch = raw.match(/exit code: (\d+)/);
-			const code = exitMatch ? Number(exitMatch[1]) : null;
-			const firstLines = clean.split("\n").slice(0, 5).join("\n").toLowerCase();
-			const hasErrorKeyword =
-				/error:|command not found|no such file|permission denied/.test(firstLines);
-
+			// Non-zero exits arrive as error results; pull the code from the status line
 			let t: string;
-			if (code !== null && code !== 0) {
-				t = theme.fg("error", `✗ exit ${code}`);
-			} else if (hasErrorKeyword && code === null) {
-				t = theme.fg("error", "✗");
+			if (context.isError) {
+				const m = raw.match(/exited with code (\d+)/);
+				t = m ? theme.fg("error", `✗ exit ${m[1]}`) : theme.fg("error", "✗");
 			} else {
 				t = theme.fg("success", "✓");
 			}
 
 			if (lines > 0) t += theme.fg("dim", ` · ${lines} line${lines === 1 ? "" : "s"}`);
-			if (timing) t += theme.fg("dim", ` · ${timing}`);
+			if (durationMs !== undefined) t += theme.fg("dim", ` · ${formatDuration(durationMs)}`);
 			if (details?.truncation?.truncated) t += theme.fg("warning", " [truncated]");
 
 			if (opts.expanded && clean) {
@@ -313,19 +336,22 @@ export default function (pi: ExtensionAPI) {
 			return new Text(t, 0, 0);
 		},
 
-		renderResult(result, opts, theme) {
+		renderResult(result, opts, theme, context) {
 			if (!isOn("read"))
-				return originals.read.renderResult!(result, opts, theme, {} as any);
+				return originals.read.renderResult!(result, opts, theme, context as any);
 			if (opts.isPartial) return new Text(theme.fg("dim", "Reading…"), 0, 0);
 
 			const details = result.details as ReadToolDetails | undefined;
 			const content = result.content[0];
 
+			if (context.isError) {
+				const firstLine =
+					content?.type === "text" ? content.text.split("\n")[0] : "Read failed";
+				return new Text(theme.fg("error", `✗ ${firstLine}`), 0, 0);
+			}
+
 			if (content?.type === "image")
 				return new Text(theme.fg("success", "Image loaded"), 0, 0);
-
-			if (content?.type === "text" && content.text.startsWith("Error"))
-				return new Text(theme.fg("error", `✗ ${content.text.split("\n")[0]}`), 0, 0);
 
 			if (content?.type !== "text")
 				return new Text(theme.fg("error", "✗ No content"), 0, 0);
@@ -367,15 +393,15 @@ export default function (pi: ExtensionAPI) {
 			);
 		},
 
-		renderResult(result, opts, theme) {
+		renderResult(result, opts, theme, context) {
 			if (!isOn("edit"))
-				return originals.edit.renderResult!(result, opts, theme, {} as any);
+				return originals.edit.renderResult!(result, opts, theme, context as any);
 			if (opts.isPartial) return new Text(theme.fg("dim", "Editing…"), 0, 0);
 
 			const details = result.details as EditToolDetails | undefined;
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-			if (text.startsWith("Error"))
-				return new Text(theme.fg("error", `✗ ${text.split("\n")[0]}`), 0, 0);
+			if (context.isError)
+				return new Text(theme.fg("error", `✗ ${text.split("\n")[0] || "Edit failed"}`), 0, 0);
 
 			if (!details?.diff)
 				return new Text(theme.fg("success", "Applied"), 0, 0);
@@ -431,13 +457,13 @@ export default function (pi: ExtensionAPI) {
 			);
 		},
 
-		renderResult(result, opts, theme) {
+		renderResult(result, opts, theme, context) {
 			if (!isOn("write"))
-				return originals.write.renderResult!(result, opts, theme, {} as any);
+				return originals.write.renderResult!(result, opts, theme, context as any);
 			if (opts.isPartial) return new Text(theme.fg("dim", "Writing…"), 0, 0);
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-			if (text.startsWith("Error"))
-				return new Text(theme.fg("error", `✗ ${text.split("\n")[0]}`), 0, 0);
+			if (context.isError)
+				return new Text(theme.fg("error", `✗ ${text.split("\n")[0] || "Write failed"}`), 0, 0);
 			return new Text(theme.fg("success", "Written"), 0, 0);
 		},
 	});
@@ -462,9 +488,9 @@ export default function (pi: ExtensionAPI) {
 			return new Text(t, 0, 0);
 		},
 
-		renderResult(result, opts, theme) {
+		renderResult(result, opts, theme, context) {
 			if (!isOn("grep"))
-				return originals.grep.renderResult!(result, opts, theme, {} as any);
+				return originals.grep.renderResult!(result, opts, theme, context as any);
 			if (opts.isPartial) return new Text(theme.fg("dim", "Searching…"), 0, 0);
 
 			const details = result.details as GrepToolDetails | undefined;
@@ -509,13 +535,17 @@ export default function (pi: ExtensionAPI) {
 			return new Text(t, 0, 0);
 		},
 
-		renderResult(result, opts, theme) {
+		renderResult(result, opts, theme, context) {
 			if (!isOn("find"))
-				return originals.find.renderResult!(result, opts, theme, {} as any);
+				return originals.find.renderResult!(result, opts, theme, context as any);
 			if (opts.isPartial) return new Text(theme.fg("dim", "Searching…"), 0, 0);
 
 			const details = result.details as FindToolDetails | undefined;
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+
+			if (text.startsWith("No files"))
+				return new Text(theme.fg("muted", "0 results"), 0, 0);
+
 			const count = lineCount(text);
 
 			let t = theme.fg("success", `${count} result${count === 1 ? "" : "s"}`);
@@ -553,9 +583,9 @@ export default function (pi: ExtensionAPI) {
 			return new Text(t, 0, 0);
 		},
 
-		renderResult(result, opts, theme) {
+		renderResult(result, opts, theme, context) {
 			if (!isOn("ls"))
-				return originals.ls.renderResult!(result, opts, theme, {} as any);
+				return originals.ls.renderResult!(result, opts, theme, context as any);
 			if (opts.isPartial) return new Text(theme.fg("dim", "Listing…"), 0, 0);
 
 			const details = result.details as LsToolDetails | undefined;

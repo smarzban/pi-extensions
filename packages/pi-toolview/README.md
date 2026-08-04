@@ -49,9 +49,9 @@ pi install /path/to/pi-extensions/packages/pi-toolview
 | Feature | Example |
 |---------|---------|
 | **Smart paths** | `src/utils.ts` inside project, `~/code/file.ts` under HOME, absolute otherwise |
-| **Bash timing** | `✓ · 42 lines · 12.3s` — duration parsed from raw output |
+| **Bash timing** | `✓ · 42 lines · 12.3s` — measured via render state, same as built-in |
 | **Write file size** | `(156 lines · 4.2 KB)` — catch accidental huge writes |
-| **Error emphasis** | `✗ exit 1` in red — also detects "error:", "not found" etc. |
+| **Error emphasis** | `✗ exit 1` in red, based on the tool's isError flag |
 | **Edit context hint** | `+12 / -4 in parseConfig` — enclosing function from diff |
 | **Per-tool control** | `/toolview bash off` — that tool reverts to verbose original |
 
@@ -89,7 +89,8 @@ Want to keep some tools at default? Use `/toolview bash off` to revert just bash
 ## How it works
 
 - Re-registers each built-in tool with the same name (pi uses the last registration)
-- `execute()` delegates to the original `create*Tool(cwd)` factory — behavior is identical
+- `execute()` delegates to the original `create*Tool(cwd)` factory, behavior is identical
+- Bash timing uses the same `context.state` mechanism the built-in renderer uses
 - Only `renderCall()` and `renderResult()` are custom (TUI display only)
 - The LLM still receives full, unmodified `result.content`
 - When disabled via `/toolview`, falls back to the original tool's renderer
