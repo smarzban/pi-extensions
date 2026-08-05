@@ -1,0 +1,46 @@
+{
+	"name": "@pi-extensions/pi-stash",
+	"version": "0.1.0",
+	"description": "Draft stash: ctrl+s saves the current editor draft per project, restores it into an empty editor",
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"stash",
+		"draft",
+		"editor"
+	],
+	"author": "Saeed Marzban",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/smarzban/pi-extensions.git",
+		"directory": "packages/pi-stash"
+	},
+	"bugs": {
+		"url": "https://github.com/smarzban/pi-extensions/issues"
+	},
+	"homepage": "https://github.com/smarzban/pi-extensions/tree/main/packages/pi-stash#readme",
+	"engines": {
+		"node": ">=20.0.0"
+	},
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*"
+	},
+	"files": [
+		"index.ts",
+		"README.md",
+		"LICENSE"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"prepublishOnly": "node -e \"require('fs').accessSync('index.ts')\""
+	}
+}
