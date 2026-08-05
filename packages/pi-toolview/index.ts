@@ -76,9 +76,14 @@ function formatBytes(n: number): string {
 }
 
 function formatDuration(ms: number): string {
-	if (ms < 1000) return `${ms}ms`;
+	if (ms < 1000) return `${Math.round(ms)}ms`;
 	const s = ms / 1000;
-	return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
+	if (s < 60) return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
+	const m = Math.round(s / 60);
+	if (m < 60) return `${m}m`;
+	const h = Math.floor(m / 60);
+	const rem = m % 60;
+	return rem === 0 ? `${h}h` : `${h}h ${rem}m`;
 }
 
 /** Strip metadata pi appends to bash output (truncation notices, exit status). */
