@@ -38,6 +38,10 @@ import { dirname, join } from "node:path";
 interface PersistedState {
 	/** Rounded editor box enabled (default true). */
 	enabled?: boolean;
+	/** Session name label on the box (default true). */
+	sessionName?: boolean;
+	/** Label position on the box border: "top" or "bottom" (default "bottom"). */
+	sessionNamePosition?: "top" | "bottom";
 }
 
 function statePath(): string {
@@ -138,6 +142,10 @@ function roundedEditorBorder(
 export default function (pi: ExtensionAPI) {
 	const saved = loadState();
 	let enabled = saved.enabled !== false;
+	let nameEnabled = saved.sessionName !== false;
+	let namePosition: "top" | "bottom" =
+		saved.sessionNamePosition === "top" ? "top" : "bottom";
+	let sessionName: string | undefined;
 	let tuiRef: { requestRender: () => void } | null = null;
 
 	/** Render the editor as a rounded rectangle with a visible prompt. */
@@ -191,7 +199,17 @@ export default function (pi: ExtensionAPI) {
 				const body = lines.slice(1, endOfEditor);
 				const extra = bottomIndex === -1 ? [] : lines.slice(bottomIndex + 1);
 
-				const result = [wrap(lines[0]!, "╭", "╮", "")];
+				const result: string[] = [];
+				const name = sessionName ?? pi.getSessionName() ?? undefined;
+				const label = name ? ctx.ui.theme.fg("accent", name) : "";
+
+				// Top border: plain, or right-aligned session name when configured.
+				if (nameEnabled && namePosition === "top" && label) {
+					result.push(roundedEditorBorder(width, "╭", "╮", borderColor, label));
+				} else {
+					result.push(wrap(lines[0]!, "╭", "╮", ""));
+				}
+
 				for (let index = 0; index < body.length; index++) {
 					result.push(wrap(body[index]!, "│", "│", index === 0 ? prompt : "  "));
 				}
@@ -200,7 +218,12 @@ export default function (pi: ExtensionAPI) {
 				for (const line of extra) {
 					result.push(wrap(line, "│", "│", "  "));
 				}
-				result.push(roundedEditorBorder(width, "╰", "╯", borderColor));
+				// Bottom border: plain, or right-aligned session name when configured.
+				if (nameEnabled && namePosition === "bottom" && label) {
+					result.push(roundedEditorBorder(width, "╰", "╯", borderColor, label));
+				} else {
+					result.push(roundedEditorBorder(width, "╰", "╯", borderColor));
+				}
 				return result;
 			}
 		}
@@ -241,34 +264,71 @@ export default function (pi: ExtensionAPI) {
 	// ── events ───────────────────────────────────────────────────────
 
 	pi.on("session_start", async (_event, ctx) => {
+		sessionName = ctx.sessionManager.getSessionName() ?? pi.getSessionName();
 		applyEditor(ctx);
+	});
+
+	pi.on("session_info_changed", async (event) => {
+		sessionName = event.name;
+		tuiRef?.requestRender();
 	});
 
 	// ── commands ─────────────────────────────────────────────────────
 
 	pi.registerCommand("editor", {
-		description: "Rounded editor box: on | off | status",
+		description: "Rounded editor box: on | off | name [top|bottom|on|off] | status",
 		handler: async (args, ctx) => {
 			const cmd = args.trim().toLowerCase();
 			if (!cmd || cmd === "status") {
-				ctx.ui.notify(`editor box: ${enabled ? "on" : "off"}`, "info");
+				ctx.ui.notify(
+					`editor box: ${enabled ? "on" : "off"} · session name: ${nameEnabled ? namePosition : "off"}`,
+					"info",
+				);
 				return;
 			}
 			if (cmd === "on" || cmd === "enable") {
 				enabled = true;
-				saveState({ enabled });
+				saveState({ enabled, sessionName: nameEnabled, sessionNamePosition: namePosition });
 				applyEditor(ctx);
 				ctx.ui.notify("Rounded editor box on", "info");
 				return;
 			}
 			if (cmd === "off" || cmd === "disable") {
 				enabled = false;
-				saveState({ enabled });
+				saveState({ enabled, sessionName: nameEnabled, sessionNamePosition: namePosition });
 				ctx.ui.setEditorComponent(undefined);
 				ctx.ui.notify("Default editor restored", "info");
 				return;
 			}
-			ctx.ui.notify("Usage: /editor [on|off|status]", "error");
+			if (cmd === "name" || cmd.startsWith("name ")) {
+				const arg = cmd.slice("name".length).trim();
+				if (arg === "" || arg === "status") {
+					ctx.ui.notify(
+						`session name label: ${nameEnabled ? namePosition : "off"}. Set: /editor name on|off|top|bottom`,
+						"info",
+					);
+					return;
+				}
+				if (arg === "on") {
+					nameEnabled = true;
+				} else if (arg === "off") {
+					nameEnabled = false;
+				} else if (arg === "top") {
+					nameEnabled = true;
+					namePosition = "top";
+				} else if (arg === "bottom") {
+					nameEnabled = true;
+					namePosition = "bottom";
+				} else {
+					ctx.ui.notify("Usage: /editor name [on|off|top|bottom]", "error");
+					return;
+				}
+				saveState({ enabled, sessionName: nameEnabled, sessionNamePosition: namePosition });
+				tuiRef?.requestRender();
+				ctx.ui.notify(`session name label: ${nameEnabled ? namePosition : "off"}`, "info");
+				return;
+			}
+			ctx.ui.notify("Usage: /editor [on|off|status] · /editor name [on|off|top|bottom]", "error");
 		},
 	});
 

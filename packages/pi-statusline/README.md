@@ -46,15 +46,18 @@ The current branch's open PR is checked on startup, branch changes, `/statusline
 ## Commands
 
 ```text
-/statusline            # status + current segments
-/statusline on         # enable custom footer (default)
-/statusline off        # restore pi’s default footer
-/statusline usage on   # opt in to provider quota (reads auth, calls provider)
-/statusline usage off  # disable provider quota (default)
-/statusline refresh    # re-fetch git (+ provider usage if enabled) now
+/statusline               # status + current segments
+/statusline on            # enable custom footer (default)
+/statusline off           # restore pi’s default footer
+/statusline usage on      # opt in to provider quota (reads auth, calls provider)
+/statusline usage off     # disable provider quota (default)
+/statusline session on    # show the [⚑ name] segment (default)
+/statusline session off   # hide the session name segment
+/statusline refresh       # re-fetch git (+ provider usage if enabled) now
 ```
 
-Both `on/off` and `usage on/off` persist to `~/.pi/agent/statusline.json`.
+All settings persist to `~/.pi/agent/statusline.json` (`enabled`,
+`usageEnabled`, `sessionName`).
 
 ## Provider usage
 

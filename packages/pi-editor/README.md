@@ -13,7 +13,18 @@ plus `getEditorText`/`setEditorText` and shortcuts), so they ship together.
 ## Rounded editor box
 
 Draws a rounded border around the input editor. The default box is square;
-this one is rounder.
+this one is rounder. The session name can be shown as a right-aligned label on
+the top or bottom border, toggled per command:
+
+| Command | Effect |
+|---------|--------|
+| `/editor` | Box + label status |
+| `/editor on` / `/editor off` | Toggle the rounded box |
+| `/editor name on` / `/editor name off` | Toggle the session name label |
+| `/editor name top` / `/editor name bottom` | Label position |
+
+Settings persist to `~/.pi/agent/editor.json` (`enabled`, `sessionName`,
+`sessionNamePosition`).
 
 ## Draft stash
 
@@ -38,8 +49,10 @@ touched.
 
 | Command | Effect |
 |---------|--------|
-| `/editor` | Show whether the rounded box is on |
+| `/editor` | Show box/label status |
 | `/editor on` / `/editor off` | Toggle the rounded box |
+| `/editor name on` / `/editor name off` | Toggle the session name label on the box |
+| `/editor name top` / `/editor name bottom` | Label position |
 | `/stash` | Stash status for this project |
 | `/stash clear` | Clear this project's stash |
 

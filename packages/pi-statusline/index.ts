@@ -59,13 +59,15 @@ const STATUS_KEY = "statusline";
 // ── persisted settings ───────────────────────────────────────────────
 
 interface PersistedState {
-	/** Custom footer/editor enabled (default true). */
+	/** Custom footer enabled (default true). */
 	enabled?: boolean;
 	/**
 	 * Provider quota display. OFF by default: while off, no auth files are read and no
 	 * network calls are made. Turn on with `/statusline usage on`.
 	 */
 	usageEnabled?: boolean;
+	/** Session name segment [⚑ name] (default true). */
+	sessionName?: boolean;
 }
 
 function statePath(): string {
@@ -397,6 +399,7 @@ export default function (pi: ExtensionAPI) {
 	let enabled = saved.enabled !== false;
 	// Provider quota is opt-in: nothing is read or fetched until the user turns it on.
 	let usageEnabled = saved.usageEnabled === true;
+	let sessionNameEnabled = saved.sessionName !== false;
 	let thinkingLevel = "off";
 	let sessionName: string | undefined;
 	let git: GitState | null = null;
@@ -413,7 +416,7 @@ export default function (pi: ExtensionAPI) {
 	let tuiRef: { requestRender: () => void } | null = null;
 	const usageCache = new Map<string, UsageSnapshot>();
 
-	const persist = () => saveState({ enabled, usageEnabled });
+	const persist = () => saveState({ enabled, usageEnabled, sessionName: sessionNameEnabled });
 
 	const stopTimer = () => {
 		if (refreshTimer) {
@@ -604,9 +607,12 @@ export default function (pi: ExtensionAPI) {
 		const prSeg =
 			prNumber != null ? bracket(theme, theme.fg("accent", `#${prNumber}`)) : "";
 
-		// Session name (first segment, when named): ⚑ name
+		// Session name (first segment, when named and enabled): ⚑ name
 		const nameNow = sessionName || ctx.sessionManager.getSessionName() || undefined;
-		const nameSeg = nameNow ? bracket(theme, theme.fg("accent", `⚑ ${nameNow}`)) : "";
+		const nameSeg =
+			sessionNameEnabled && nameNow
+				? bracket(theme, theme.fg("accent", `⚑ ${nameNow}`))
+				: "";
 
 		const sep = "  ";
 		const parts = [nameSeg, modelSeg, ctxSeg, costSeg, ...usageSegs, gitSeg, prSeg].filter(Boolean);
@@ -714,7 +720,7 @@ export default function (pi: ExtensionAPI) {
 	// ── command ──────────────────────────────────────────────────────
 
 	pi.registerCommand("statusline", {
-		description: "Statusline footer: on | off | usage on|off | refresh",
+		description: "Statusline footer: on | off | usage on|off | session on|off | refresh",
 		handler: async (args, ctx) => {
 			const cmd = args.trim().toLowerCase();
 			if (!cmd || cmd === "status") {
@@ -797,7 +803,27 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify("Statusline refreshed", "info");
 				return;
 			}
-			ctx.ui.notify("Usage: /statusline [on|off|usage on|off|refresh]", "error");
+			// Session name segment: [⚑ name]
+			if (cmd === "session") {
+				ctx.ui.notify(`Session name segment: ${sessionNameEnabled ? "on" : "off"}. Toggle: /statusline session on|off`, "info");
+				return;
+			}
+			if (cmd.startsWith("session ")) {
+				const arg = cmd.slice("session".length).trim();
+				if (arg === "on" || arg === "enable") {
+					sessionNameEnabled = true;
+				} else if (arg === "off" || arg === "disable") {
+					sessionNameEnabled = false;
+				} else {
+					ctx.ui.notify("Usage: /statusline session [on|off]", "error");
+					return;
+				}
+				persist();
+				tuiRef?.requestRender();
+				ctx.ui.notify(`Session name segment: ${sessionNameEnabled ? "on" : "off"}`, "info");
+				return;
+			}
+			ctx.ui.notify("Usage: /statusline [on|off|usage on|off|session on|off|refresh]", "error");
 		},
 	});
 }
