@@ -45,4 +45,10 @@ Compact tool output for bash/read/edit/write/grep/find/ls. Full details in the o
 
 ## Note
 
-This branch was rebased onto `pi-toolview`, so it carries toolview's commits too. If pi-toolview's PR is merged first, this branch's copy of those commits will dedupe on merge; otherwise this branch can serve as the base for both.
+This branch was rebased onto `pi-toolview`, so toolview's commits are in this
+history with the same SHAs (pi-toolview is an ancestor of pi-stash). Merge
+order: merge pi-toolview's PR first (as a merge commit) — then pi-stash lands
+as just its 4 commits. If either PR is squash/rebase-merged, GitHub mints new
+SHAs for the same content and the second merge's diff stat re-shows the other
+feature (content stays correct, no conflicts). Merging stash first would make
+toolview's PR a content no-op.
