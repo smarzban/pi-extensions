@@ -1,6 +1,6 @@
 # @pi-extensions/pi-statusline
 
-Custom **statusline** for [pi](https://github.com/earendil-works/pi): a rounded editor text box with a prompt and bottom-right session name, plus a footer with model/effort, context, provider remaining, git branch, PR, and diff.
+Custom **statusline** for [pi](https://github.com/earendil-works/pi): a footer with model/effort, context, provider remaining, git branch, PR, and diff.
 
 Part of the [pi-extensions](https://github.com/smarzban/pi-extensions) monorepo.
 
@@ -8,14 +8,15 @@ Part of the [pi-extensions](https://github.com/smarzban/pi-extensions) monorepo.
 
 ## Highlights
 
-- **Rounded text box** with `╭─╮`, `│ │`, and `╰─╯` corners plus a `›` prompt
-- **Session name on the editor's bottom-right border**
 - **Model · effort** from the active model + thinking level
 - **Context** as `ctx N% · used/total`: green below 50%, yellow at 50%+, red at 70%+
 - **Session cost** `$x.xxx` from assistant `usage.cost.total` when non-zero
 - **Provider remaining** for **openai-codex**, **opt-in, off by default** (see [Provider usage](#provider-usage))
 - **Git** `⎇ branch +staged *unstaged ?untracked` plus ahead/behind; **open PR** via `gh` when present
 - **Local by default** with no network calls or token reads unless you enable provider usage
+
+> The rounded editor box with the session-name label moved to its own package:
+> [pi-editor](../pi-editor). Install both to get the old look.
 
 ## Quickstart
 
@@ -34,9 +35,6 @@ Restart pi. Name the session so it shows:
 Example (default, no provider-usage segment until you opt in):
 
 ```text
-╭─────────────────────────────╮
-│ › type here…                │
-╰────────────────────── my task ──╯
 [gpt-5-codex · high]  [ctx 12% · 24k/200k]  [$0.042]  [⎇ main +1 *2 ?1]  [#12]
 ```
 
