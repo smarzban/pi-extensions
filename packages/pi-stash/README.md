@@ -21,7 +21,7 @@ pi install npm:@pi-extensions/pi-stash
 | Action | Effect |
 |--------|--------|
 | `ctrl+s` with text in the editor | Stash it and clear the editor |
-| `ctrl+s` with an empty editor | Restore the stashed draft |
+| `ctrl+s` with an empty editor | Restore the stash into the editor (one-shot, the stash is then cleared) |
 | `/stash` | Show stash status for this project |
 | `/stash clear` | Clear this project's stash |
 
