@@ -1,8 +1,8 @@
 /**
  * pi-stash — draft stash for the input editor
  *
- * ctrl+s with text in the editor stashes it (per project); ctrl+s with an
- * empty editor restores the stashed draft. Single stash per project, keyed by
+ * ctrl+s with text in the editor stashes it (per project) and clears the
+ * editor; ctrl+s with an empty editor restores the stashed draft. Single stash per project, keyed by
  * session cwd, persisted to ~/.pi/agent/stash.json (same dir pattern as
  * toolview.json). Survives sessions and restarts.
  *
@@ -67,6 +67,7 @@ export default function (pi: ExtensionAPI) {
 			if (text.trim()) {
 				file.stashes[key] = { text, savedAt: new Date().toISOString() };
 				saveStashes(file);
+				ctx.ui.setEditorText("");
 				ctx.ui.notify(`Stashed ${text.length} chars`, "info");
 			} else {
 				const entry = file.stashes[key];
