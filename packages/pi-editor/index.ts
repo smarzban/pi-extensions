@@ -3,14 +3,13 @@
  *
  *   ╭─────────────────────────╮
  *   │ › text box              │
- *   ╰────────────── name ────╯
+ *   ╰─────────────────────────╯
  *
  * Two editor-surface features in one package (pi exposes the input editor as
  * one extension surface: the editor component itself plus getEditorText /
  * setEditorText / shortcuts):
  *
- *   1. Rounded editor box — drawn border around the input editor with the
- *      session name as a right-aligned label.
+ *   1. Rounded editor box — drawn border around the input editor.
  *   2. Draft stash — ctrl+s saves the current draft (per project) and clears
  *      the editor; ctrl+s with an empty editor restores it (one-shot).
  *
@@ -139,7 +138,6 @@ function roundedEditorBorder(
 export default function (pi: ExtensionAPI) {
 	const saved = loadState();
 	let enabled = saved.enabled !== false;
-	let sessionName: string | undefined;
 	let tuiRef: { requestRender: () => void } | null = null;
 
 	/** Render the editor as a rounded rectangle with a visible prompt. */
@@ -202,16 +200,7 @@ export default function (pi: ExtensionAPI) {
 				for (const line of extra) {
 					result.push(wrap(line, "│", "│", "  "));
 				}
-				const name = sessionName ?? pi.getSessionName() ?? undefined;
-				result.push(
-					roundedEditorBorder(
-						width,
-						"╰",
-						"╯",
-						borderColor,
-						name ? ctx.ui.theme.fg("accent", name) : "",
-					),
-				);
+				result.push(roundedEditorBorder(width, "╰", "╯", borderColor));
 				return result;
 			}
 		}
@@ -252,13 +241,7 @@ export default function (pi: ExtensionAPI) {
 	// ── events ───────────────────────────────────────────────────────
 
 	pi.on("session_start", async (_event, ctx) => {
-		sessionName = ctx.sessionManager.getSessionName() ?? pi.getSessionName();
 		applyEditor(ctx);
-	});
-
-	pi.on("session_info_changed", async (event) => {
-		sessionName = event.name;
-		tuiRef?.requestRender();
 	});
 
 	// ── commands ─────────────────────────────────────────────────────

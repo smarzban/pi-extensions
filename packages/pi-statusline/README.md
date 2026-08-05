@@ -8,6 +8,7 @@ Part of the [pi-extensions](https://github.com/smarzban/pi-extensions) monorepo.
 
 ## Highlights
 
+- **Session name** `⚑ name` as the leading footer segment
 - **Model · effort** from the active model + thinking level
 - **Context** as `ctx N% · used/total`: green below 50%, yellow at 50%+, red at 70%+
 - **Session cost** `$x.xxx` from assistant `usage.cost.total` when non-zero
@@ -35,7 +36,7 @@ Restart pi. Name the session so it shows:
 Example (default, no provider-usage segment until you opt in):
 
 ```text
-[gpt-5-codex · high]  [ctx 12% · 24k/200k]  [$0.042]  [⎇ main +1 *2 ?1]  [#12]
+[⚑ my task]  [gpt-5-codex · high]  [ctx 12% · 24k/200k]  [$0.042]  [⎇ main +1 *2 ?1]  [#12]
 ```
 
 After `/statusline usage on`, a Codex quota segment appears: `[5h 80% rem · 4h]`.

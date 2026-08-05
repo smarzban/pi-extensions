@@ -7,14 +7,13 @@ plus `getEditorText`/`setEditorText` and shortcuts), so they ship together.
 ```
 ╭─────────────────────────╮
 │ › text box              │
-╰────────────── name ────╯
+╰─────────────────────────╯
 ```
 
 ## Rounded editor box
 
-Draws a rounded border around the input editor with the session name as a
-right-aligned label on the bottom border. The default box is square; this one
-is rounder and shows which session you're in.
+Draws a rounded border around the input editor. The default box is square;
+this one is rounder.
 
 ## Draft stash
 

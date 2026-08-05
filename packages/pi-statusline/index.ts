@@ -604,8 +604,12 @@ export default function (pi: ExtensionAPI) {
 		const prSeg =
 			prNumber != null ? bracket(theme, theme.fg("accent", `#${prNumber}`)) : "";
 
+		// Session name (first segment, when named): ⚑ name
+		const nameNow = sessionName || ctx.sessionManager.getSessionName() || undefined;
+		const nameSeg = nameNow ? bracket(theme, theme.fg("accent", `⚑ ${nameNow}`)) : "";
+
 		const sep = "  ";
-		const parts = [modelSeg, ctxSeg, costSeg, ...usageSegs, gitSeg, prSeg].filter(Boolean);
+		const parts = [nameSeg, modelSeg, ctxSeg, costSeg, ...usageSegs, gitSeg, prSeg].filter(Boolean);
 		const lines: string[] = [];
 		let current = "";
 		for (const p of parts) {
