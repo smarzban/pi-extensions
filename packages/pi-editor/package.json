@@ -1,0 +1,47 @@
+{
+	"name": "@pi-extensions/pi-editor",
+	"version": "0.1.0",
+	"description": "Rounded input editor box + draft stash (ctrl+s saves/restores the editor draft per project)",
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"editor",
+		"stash",
+		"draft"
+	],
+	"author": "Saeed Marzban",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/smarzban/pi-extensions.git",
+		"directory": "packages/pi-editor"
+	},
+	"bugs": {
+		"url": "https://github.com/smarzban/pi-extensions/issues"
+	},
+	"homepage": "https://github.com/smarzban/pi-extensions/tree/main/packages/pi-editor#readme",
+	"engines": {
+		"node": ">=20.0.0"
+	},
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*"
+	},
+	"files": [
+		"index.ts",
+		"README.md",
+		"LICENSE"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"prepublishOnly": "node -e \"require('fs').accessSync('index.ts')\""
+	}
+}

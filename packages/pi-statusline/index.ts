@@ -1,9 +1,6 @@
 /**
- * pi-statusline: rounded editor box + session/model stats footer
+ * pi-statusline: session/model stats footer
  *
- *   ╭─────────────────────────╮
- *   │ › text box              │
- *   ╰────────────── name ────╯
  *   [model · effort] [ctx …] [usage] [branch/diff] [#pr]
  *
  * Install:
@@ -19,13 +16,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
-	CustomEditor,
 	type ExtensionAPI,
 	type ExtensionContext,
 	getAgentDir,
-	type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 // ── types ────────────────────────────────────────────────────────────
@@ -65,13 +59,15 @@ const STATUS_KEY = "statusline";
 // ── persisted settings ───────────────────────────────────────────────
 
 interface PersistedState {
-	/** Custom footer/editor enabled (default true). */
+	/** Custom footer enabled (default true). */
 	enabled?: boolean;
 	/**
 	 * Provider quota display. OFF by default: while off, no auth files are read and no
 	 * network calls are made. Turn on with `/statusline usage on`.
 	 */
 	usageEnabled?: boolean;
+	/** Session name segment [⚑ name] (default true). */
+	sessionName?: boolean;
 }
 
 function statePath(): string {
@@ -396,41 +392,6 @@ function readPrNumber(cwd: string, branch: string): Promise<number | null | unde
 	});
 }
 
-// ── editor border helpers ────────────────────────────────────────────
-
-function stripAnsi(text: string): string {
-	return text.replace(/[\u001b\u009b][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d/#&.:=?%@~_]+)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g, "");
-}
-
-function isHorizontalBorder(text: string): boolean {
-	const plain = stripAnsi(text);
-	return plain.length > 0 && plain.replace(/─/g, "") === "";
-}
-
-/** Build a rounded border with an optional right-aligned label. */
-function roundedEditorBorder(
-	width: number,
-	left: string,
-	right: string,
-	border: (text: string) => string,
-	label = "",
-): string {
-	const innerWidth = Math.max(0, width - 2);
-	if (!label) return border(left) + border("─".repeat(innerWidth)) + border(right);
-
-	let labelText = ` ${label} `;
-	const tailWidth = Math.min(2, Math.max(0, innerWidth - visibleWidth(labelText)));
-	labelText = truncateToWidth(labelText, Math.max(0, innerWidth - tailWidth), "");
-	const leftWidth = Math.max(0, innerWidth - visibleWidth(labelText) - tailWidth);
-	return (
-		border(left) +
-		border("─".repeat(leftWidth)) +
-		labelText +
-		border("─".repeat(tailWidth)) +
-		border(right)
-	);
-}
-
 // ── extension ────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
@@ -438,6 +399,7 @@ export default function (pi: ExtensionAPI) {
 	let enabled = saved.enabled !== false;
 	// Provider quota is opt-in: nothing is read or fetched until the user turns it on.
 	let usageEnabled = saved.usageEnabled === true;
+	let sessionNameEnabled = saved.sessionName !== false;
 	let thinkingLevel = "off";
 	let sessionName: string | undefined;
 	let git: GitState | null = null;
@@ -454,7 +416,7 @@ export default function (pi: ExtensionAPI) {
 	let tuiRef: { requestRender: () => void } | null = null;
 	const usageCache = new Map<string, UsageSnapshot>();
 
-	const persist = () => saveState({ enabled, usageEnabled });
+	const persist = () => saveState({ enabled, usageEnabled, sessionName: sessionNameEnabled });
 
 	const stopTimer = () => {
 		if (refreshTimer) {
@@ -533,16 +495,6 @@ export default function (pi: ExtensionAPI) {
 			.catch(() => {
 				prLookupInFlight = false;
 			});
-	};
-
-	const resolveName = (ctx?: ExtensionContext): string | undefined => {
-		const name =
-			(ctx ? ctx.sessionManager.getSessionName() : undefined) ||
-			pi.getSessionName() ||
-			sessionName ||
-			undefined;
-		if (name) sessionName = name;
-		return name;
 	};
 
 	const bracket = (theme: any, inner: string) =>
@@ -655,8 +607,17 @@ export default function (pi: ExtensionAPI) {
 		const prSeg =
 			prNumber != null ? bracket(theme, theme.fg("accent", `#${prNumber}`)) : "";
 
+		// Session name (first segment, when named and enabled): ⚑ name
+		// Live session first: the module-level cache is shared by every session in this
+		// process, so an unnamed session could otherwise inherit another one's name.
+		const nameNow = ctx.sessionManager.getSessionName() || sessionName || undefined;
+		const nameSeg =
+			sessionNameEnabled && nameNow
+				? bracket(theme, theme.fg("accent", `⚑ ${nameNow}`))
+				: "";
+
 		const sep = "  ";
-		const parts = [modelSeg, ctxSeg, costSeg, ...usageSegs, gitSeg, prSeg].filter(Boolean);
+		const parts = [nameSeg, modelSeg, ctxSeg, costSeg, ...usageSegs, gitSeg, prSeg].filter(Boolean);
 		const lines: string[] = [];
 		let current = "";
 		for (const p of parts) {
@@ -670,85 +631,6 @@ export default function (pi: ExtensionAPI) {
 		}
 		if (current) lines.push(truncateToWidth(current, width));
 		return lines.length ? lines : [dim("")];
-	};
-
-	/** Render the editor as a rounded rectangle with a visible prompt. */
-	const applyEditor = (ctx: ExtensionContext) => {
-		if (!ctx.hasUI) return;
-		if (!enabled) {
-			ctx.ui.setEditorComponent(undefined);
-			return;
-		}
-
-		class StatuslineEditor extends CustomEditor {
-			constructor(tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) {
-				super(tui, theme, keybindings, { paddingX: 0 });
-				tuiRef = tui;
-			}
-
-			render(width: number): string[] {
-				if (width < 6) return super.render(width);
-
-				// Render four columns narrower: two for the outer │ borders and two for
-				// the "› " hanging prompt. Nothing is truncated afterwards, so a full
-				// first line keeps its last character and the cursor cell / IME marker
-				// always survive.
-				const innerWidth = width - 2;
-				const lines = super.render(innerWidth - 2);
-				if (lines.length < 2) return lines;
-
-				const borderColor = (text: string) => this.borderColor(text);
-				const prompt = `${ctx.ui.theme.fg("accent", "›")} `;
-
-				// Border-like lines (visible text ends with ─: the horizontal borders
-				// and any "↑/↓ N more" scroll indicator) are extended with ─ so the
-				// indicator stays intact inside the shell; text lines get the hanging
-				// prompt/indent and are space-padded.
-				const wrap = (line: string, left: string, right: string, prefix: string) => {
-					const borderLike = stripAnsi(line).endsWith("─");
-					const content = borderLike ? line : prefix + line;
-					const gap = Math.max(0, innerWidth - visibleWidth(content));
-					const fill = borderLike ? borderColor("─".repeat(gap)) : " ".repeat(gap);
-					return borderColor(left) + content + fill + borderColor(right);
-				};
-
-				// The bottom border is the last all-─ line; searching from the end keeps
-				// a user-typed ─── rule from being mistaken for it. When the editor is
-				// scrolled the bottom border carries a "↓ N more" indicator and is not
-				// all-─, so it stays visible as a boxed line above the ╰──╯ appended below.
-				const bottomIndex = lines.findLastIndex(
-					(line, index) => index > 0 && isHorizontalBorder(line),
-				);
-				const endOfEditor = bottomIndex === -1 ? lines.length : bottomIndex;
-				const body = lines.slice(1, endOfEditor);
-				const extra = bottomIndex === -1 ? [] : lines.slice(bottomIndex + 1);
-
-				const result = [wrap(lines[0]!, "╭", "╮", "")];
-				for (let index = 0; index < body.length; index++) {
-					result.push(wrap(body[index]!, "│", "│", index === 0 ? prompt : "  "));
-				}
-				// Autocomplete entries remain inside the same rounded shell, aligned
-				// with the input text.
-				for (const line of extra) {
-					result.push(wrap(line, "│", "│", "  "));
-				}
-				const name = resolveName(ctx);
-				result.push(
-					roundedEditorBorder(
-						width,
-						"╰",
-						"╯",
-						borderColor,
-						name ? ctx.ui.theme.fg("accent", name) : "",
-					),
-				);
-				return result;
-			}
-		}
-
-		ctx.ui.setEditorComponent(
-			(tui, theme, keybindings) => new StatuslineEditor(tui, theme, keybindings),
-		);
 	};
 
 	const applyFooter = (ctx: ExtensionContext) => {
@@ -790,7 +672,6 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	const applyAll = (ctx: ExtensionContext) => {
-		applyEditor(ctx);
 		applyFooter(ctx);
 	};
 
@@ -841,7 +722,7 @@ export default function (pi: ExtensionAPI) {
 	// ── command ──────────────────────────────────────────────────────
 
 	pi.registerCommand("statusline", {
-		description: "Statusline footer: on | off | usage on|off | refresh",
+		description: "Statusline footer: on | off | usage on|off | session on|off | refresh",
 		handler: async (args, ctx) => {
 			const cmd = args.trim().toLowerCase();
 			if (!cmd || cmd === "status") {
@@ -872,8 +753,7 @@ export default function (pi: ExtensionAPI) {
 				persist();
 				stopTimer();
 				ctx.ui.setFooter(undefined);
-				ctx.ui.setEditorComponent(undefined);
-				ctx.ui.notify("Default footer + editor restored", "info");
+				ctx.ui.notify("Default footer restored", "info");
 				return;
 			}
 			// Provider quota display is opt-in (reads auth + calls the provider). Codex only.
@@ -925,7 +805,27 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify("Statusline refreshed", "info");
 				return;
 			}
-			ctx.ui.notify("Usage: /statusline [on|off|usage on|off|refresh]", "error");
+			// Session name segment: [⚑ name]
+			if (cmd === "session") {
+				ctx.ui.notify(`Session name segment: ${sessionNameEnabled ? "on" : "off"}. Toggle: /statusline session on|off`, "info");
+				return;
+			}
+			if (cmd.startsWith("session ")) {
+				const arg = cmd.slice("session".length).trim();
+				if (arg === "on" || arg === "enable") {
+					sessionNameEnabled = true;
+				} else if (arg === "off" || arg === "disable") {
+					sessionNameEnabled = false;
+				} else {
+					ctx.ui.notify("Usage: /statusline session [on|off]", "error");
+					return;
+				}
+				persist();
+				tuiRef?.requestRender();
+				ctx.ui.notify(`Session name segment: ${sessionNameEnabled ? "on" : "off"}`, "info");
+				return;
+			}
+			ctx.ui.notify("Usage: /statusline [on|off|usage on|off|session on|off|refresh]", "error");
 		},
 	});
 }
