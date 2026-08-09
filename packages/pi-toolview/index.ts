@@ -647,11 +647,18 @@ export default function (pi: ExtensionAPI) {
 			"Compact vs full tool output. /toolview compact · /toolview bash full",
 		handler: async (args, ctx) => {
 			// Re-render already-drawn tool blocks so a toggle applies immediately.
+			// pi's setToolsExpanded returns early when the value is unchanged
+			// (interactive-mode.js: `if (expanded === this.toolOutputExpanded) return`),
+			// so setting it to its current value re-renders nothing. Flip it and flip
+			// it straight back: each call rebuilds every tool block through its
+			// renderer, and the pair leaves the expansion state where it started.
 			const refresh = () => {
 				try {
-					ctx.ui.setToolsExpanded(ctx.ui.getToolsExpanded());
+					const current = ctx.ui.getToolsExpanded();
+					ctx.ui.setToolsExpanded(!current);
+					ctx.ui.setToolsExpanded(current);
 				} catch {
-					// non-fatal: toggle still applies to newly-rendered tools
+					// non-fatal: the change still applies to newly-rendered tools
 				}
 			};
 			// Accept "compact"/"full" as primary, "on"/"off" as legacy aliases.
