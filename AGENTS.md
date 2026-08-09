@@ -25,6 +25,8 @@ installable) on its own. Modeled after [ogulcancelik/pi-extensions](https://gith
 packages/
   pi-pacman/            # Pac-Man working indicator
   pi-statusline/        # Custom footer statusline
+  pi-toolview/          # Compact built-in tool output display
+  pi-editor/            # Rounded input editor box and draft stash
 ```
 
 Each package has its own `package.json` with `"pi": { "extensions": [...] }` declaring entry points.
