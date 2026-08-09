@@ -11,7 +11,8 @@
 	"pi": {
 		"extensions": [
 			"./packages/pi-pacman",
-			"./packages/pi-statusline"
+			"./packages/pi-statusline",
+			"./packages/pi-toolview"
 		]
 	},
 	"devDependencies": {
