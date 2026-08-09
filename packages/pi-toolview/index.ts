@@ -183,7 +183,7 @@ function parseFuncName(ctx: string): string | null {
 	];
 	for (const pat of patterns) {
 		const m = ctx.match(pat);
-		if (m?.[1] && !["if", "for", "while", "switch", "catch"].includes(m[1])) {
+		if (m?.[1] && !["if", "for", "while", "switch", "catch", "return"].includes(m[1])) {
 			return m[1];
 		}
 	}
@@ -251,7 +251,7 @@ export default function (pi: ExtensionAPI) {
 	// A per-tool override wins over the global default in both directions.
 	const isOn = (t: ToolName): boolean => state.tools[t] ?? state.enabled;
 
-	const d = (p: string) => displayPath(p, cwd);
+	const d = (p: string, toolCwd: string) => displayPath(p, toolCwd);
 
 	const toolLabel = (theme: any, label: string) =>
 		theme.fg("toolTitle", theme.bold(label));
@@ -282,8 +282,8 @@ export default function (pi: ExtensionAPI) {
 		parameters: originals.bash.parameters,
 		renderShell: "self",
 
-		async execute(id, params, signal, onUpdate) {
-			return originals.bash.execute(id, params, signal, onUpdate);
+		async execute(id, params, signal, onUpdate, ctx) {
+			return createBashTool(ctx.cwd).execute(id, params, signal, onUpdate);
 		},
 
 		renderCall(args, theme, context) {
@@ -348,12 +348,12 @@ export default function (pi: ExtensionAPI) {
 		parameters: originals.read.parameters,
 		renderShell: "self",
 
-		async execute(id, params, signal, onUpdate) {
-			return originals.read.execute(id, params, signal, onUpdate);
+		async execute(id, params, signal, onUpdate, ctx) {
+			return createReadTool(ctx.cwd).execute(id, params, signal, onUpdate);
 		},
 
 		renderCall(args, theme, context) {
-			let t = `${toolLabel(theme, "read")} ${theme.fg("accent", d(args.path))}`;
+			let t = `${toolLabel(theme, "read")} ${theme.fg("accent", d(args.path, context.cwd))}`;
 			if (args.offset !== undefined || args.limit !== undefined) {
 				const bits: string[] = [];
 				if (args.offset) bits.push(`offset=${args.offset}`);
@@ -386,7 +386,7 @@ export default function (pi: ExtensionAPI) {
 
 			// ON: compact summary.
 			const details = result.details as ReadToolDetails | undefined;
-			const lines = content.text.split("\n").length;
+			const lines = lineCount(content.text);
 			let t = theme.fg("success", `${lines} line${lines === 1 ? "" : "s"}`);
 			if (details?.truncation?.truncated)
 				t += theme.fg("warning", ` (truncated from ${details.truncation.totalLines})`);
@@ -409,13 +409,13 @@ export default function (pi: ExtensionAPI) {
 		parameters: originals.edit.parameters,
 		renderShell: "self",
 
-		async execute(id, params, signal, onUpdate) {
-			return originals.edit.execute(id, params, signal, onUpdate);
+		async execute(id, params, signal, onUpdate, ctx) {
+			return createEditTool(ctx.cwd).execute(id, params, signal, onUpdate);
 		},
 
 		renderCall(args, theme, context) {
 			const n = args.edits?.length ?? 1;
-			const t = `${toolLabel(theme, "edit")} ${theme.fg("accent", d(args.path))}${theme.fg("dim", ` (${n} change${n === 1 ? "" : "s"})`)}`;
+			const t = `${toolLabel(theme, "edit")} ${theme.fg("accent", d(args.path, context.cwd))}${theme.fg("dim", ` (${n} change${n === 1 ? "" : "s"})`)}`;
 			return row(t, theme, context, context.isPartial);
 		},
 
@@ -465,14 +465,14 @@ export default function (pi: ExtensionAPI) {
 		parameters: originals.write.parameters,
 		renderShell: "self",
 
-		async execute(id, params, signal, onUpdate) {
-			return originals.write.execute(id, params, signal, onUpdate);
+		async execute(id, params, signal, onUpdate, ctx) {
+			return createWriteTool(ctx.cwd).execute(id, params, signal, onUpdate);
 		},
 
 		renderCall(args, theme, context) {
 			const lines = args.content.split("\n").length;
 			const size = new TextEncoder().encode(args.content).length;
-			const t = `${toolLabel(theme, "write")} ${theme.fg("accent", d(args.path))}${theme.fg("dim", ` (${lines} lines · ${formatBytes(size)})`)}`;
+			const t = `${toolLabel(theme, "write")} ${theme.fg("accent", d(args.path, context.cwd))}${theme.fg("dim", ` (${lines} lines · ${formatBytes(size)})`)}`;
 			return row(t, theme, context, context.isPartial);
 		},
 
@@ -502,13 +502,13 @@ export default function (pi: ExtensionAPI) {
 		parameters: originals.grep.parameters,
 		renderShell: "self",
 
-		async execute(id, params, signal, onUpdate) {
-			return originals.grep.execute(id, params, signal, onUpdate);
+		async execute(id, params, signal, onUpdate, ctx) {
+			return createGrepTool(ctx.cwd).execute(id, params, signal, onUpdate);
 		},
 
 		renderCall(args, theme, context) {
 			let t = `${toolLabel(theme, "grep")} ${theme.fg("accent", `/${args.pattern}/`)}`;
-			if (args.path) t += theme.fg("dim", ` in ${d(args.path)}`);
+			if (args.path) t += theme.fg("dim", ` in ${d(args.path, context.cwd)}`);
 			if (args.glob) t += theme.fg("dim", ` --glob=${args.glob}`);
 			return row(t, theme, context, context.isPartial);
 		},
@@ -517,6 +517,11 @@ export default function (pi: ExtensionAPI) {
 			if (opts.isPartial) return row(theme.fg("dim", "Searching…"), theme, context, true);
 
 			const text = textOf(result);
+
+			if (context.isError) {
+				const body = isOn("grep") ? text.split("\n")[0] : text.trimEnd();
+				return row(theme.fg("error", `✗ ${body || "grep failed"}`), theme, context, false);
+			}
 
 			// OFF: full match list in the pill.
 			if (!isOn("grep")) {
@@ -552,13 +557,13 @@ export default function (pi: ExtensionAPI) {
 		parameters: originals.find.parameters,
 		renderShell: "self",
 
-		async execute(id, params, signal, onUpdate) {
-			return originals.find.execute(id, params, signal, onUpdate);
+		async execute(id, params, signal, onUpdate, ctx) {
+			return createFindTool(ctx.cwd).execute(id, params, signal, onUpdate);
 		},
 
 		renderCall(args, theme, context) {
 			let t = `${toolLabel(theme, "find")} ${theme.fg("accent", args.pattern)}`;
-			if (args.path) t += theme.fg("dim", ` in ${d(args.path)}`);
+			if (args.path) t += theme.fg("dim", ` in ${d(args.path, context.cwd)}`);
 			if (args.limit) t += theme.fg("dim", ` (limit ${args.limit})`);
 			return row(t, theme, context, context.isPartial);
 		},
@@ -567,6 +572,11 @@ export default function (pi: ExtensionAPI) {
 			if (opts.isPartial) return row(theme.fg("dim", "Searching…"), theme, context, true);
 
 			const text = textOf(result);
+
+			if (context.isError) {
+				const body = isOn("find") ? text.split("\n")[0] : text.trimEnd();
+				return row(theme.fg("error", `✗ ${body || "find failed"}`), theme, context, false);
+			}
 
 			// OFF: full path list in the pill.
 			if (!isOn("find")) {
@@ -602,12 +612,12 @@ export default function (pi: ExtensionAPI) {
 		parameters: originals.ls.parameters,
 		renderShell: "self",
 
-		async execute(id, params, signal, onUpdate) {
-			return originals.ls.execute(id, params, signal, onUpdate);
+		async execute(id, params, signal, onUpdate, ctx) {
+			return createLsTool(ctx.cwd).execute(id, params, signal, onUpdate);
 		},
 
 		renderCall(args, theme, context) {
-			const target = args.path ? d(args.path) : ".";
+			const target = args.path ? d(args.path, context.cwd) : ".";
 			let t = `${toolLabel(theme, "ls")} ${theme.fg("accent", target)}`;
 			if (args.limit) t += theme.fg("dim", ` (limit ${args.limit})`);
 			return row(t, theme, context, context.isPartial);
@@ -617,6 +627,11 @@ export default function (pi: ExtensionAPI) {
 			if (opts.isPartial) return row(theme.fg("dim", "Listing…"), theme, context, true);
 
 			const text = textOf(result);
+
+			if (context.isError) {
+				const body = isOn("ls") ? text.split("\n")[0] : text.trimEnd();
+				return row(theme.fg("error", `✗ ${body || "ls failed"}`), theme, context, false);
+			}
 
 			// OFF: full entry list in the pill.
 			if (!isOn("ls")) {
