@@ -59,7 +59,9 @@ function displayPath(p: string, cwd: string): string {
 	const home = process.env.HOME || process.env.USERPROFILE;
 	const rel = relative(cwd, p);
 	if (!rel.startsWith("..") && !rel.startsWith(sep + "..")) return rel || ".";
-	if (home && p.startsWith(home)) return `~${p.slice(home.length)}`;
+	// Match HOME on a path boundary: a bare prefix test turns /home/user2/x into ~2/x.
+	if (home && (p === home || p.startsWith(home + sep)))
+		return `~${p.slice(home.length)}`;
 	return p;
 }
 
@@ -194,7 +196,13 @@ type ToolName = "bash" | "read" | "edit" | "write" | "grep" | "find" | "ls";
 const TOOL_NAMES: ToolName[] = ["bash", "read", "edit", "write", "grep", "find", "ls"];
 
 interface CompactState {
+	/** Global default when a tool has no override of its own. */
 	enabled: boolean;
+	/**
+	 * Per-tool override of the global default. `true` forces compact, `false`
+	 * forces full, absent follows `enabled`. Both directions must be
+	 * representable, otherwise a per-tool command cannot escape the global mode.
+	 */
 	tools: Partial<Record<ToolName, boolean>>;
 }
 
@@ -240,8 +248,8 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	const state = loadState();
-	const isOn = (t: ToolName): boolean =>
-		state.enabled && state.tools[t] !== false;
+	// A per-tool override wins over the global default in both directions.
+	const isOn = (t: ToolName): boolean => state.tools[t] ?? state.enabled;
 
 	const d = (p: string) => displayPath(p, cwd);
 
@@ -362,8 +370,11 @@ export default function (pi: ExtensionAPI) {
 			if (content?.type === "image")
 				return row(theme.fg("success", "Image loaded"), theme, context, false);
 			if (context.isError) {
-				const firstLine = content?.type === "text" ? content.text.split("\n")[0] : "Read failed";
-				return row(theme.fg("error", `✗ ${firstLine}`), theme, context, false);
+				const full = content?.type === "text" ? content.text.trimEnd() : "Read failed";
+				// Full mode must show the whole diagnostic: a failure is when the user
+				// most wants it, so the error branch cannot pre-empt it.
+				const body = isOn("read") ? full.split("\n")[0] : full;
+				return row(theme.fg("error", `✗ ${body}`), theme, context, false);
 			}
 			if (content?.type !== "text")
 				return row(theme.fg("error", "✗ No content"), theme, context, false);
@@ -413,8 +424,10 @@ export default function (pi: ExtensionAPI) {
 
 			const details = result.details as EditToolDetails | undefined;
 			const text = textOf(result);
-			if (context.isError)
-				return row(theme.fg("error", `✗ ${text.split("\n")[0] || "Edit failed"}`), theme, context, false);
+			if (context.isError) {
+				const body = isOn("edit") ? text.split("\n")[0] : text.trimEnd();
+				return row(theme.fg("error", `✗ ${body || "Edit failed"}`), theme, context, false);
+			}
 
 			// OFF: full colored diff in the pill.
 			if (!isOn("edit")) {
@@ -466,8 +479,10 @@ export default function (pi: ExtensionAPI) {
 		renderResult(result, opts, theme, context) {
 			if (opts.isPartial) return row(theme.fg("dim", "Writing…"), theme, context, true);
 			const text = textOf(result);
-			if (context.isError)
-				return row(theme.fg("error", `✗ ${text.split("\n")[0] || "Write failed"}`), theme, context, false);
+			if (context.isError) {
+				const body = isOn("write") ? text.split("\n")[0] : text.trimEnd();
+				return row(theme.fg("error", `✗ ${body || "Write failed"}`), theme, context, false);
+			}
 
 			// OFF: full result message in the pill.
 			if (!isOn("write")) {
@@ -645,10 +660,10 @@ export default function (pi: ExtensionAPI) {
 
 			if (!raw) {
 				const status = state.enabled ? "compact" : "full";
-				const perTool = TOOL_NAMES.map((t) => {
-					const on = state.tools[t] !== false;
-					return on ? t : `${t}(full)`;
-				}).join(", ");
+				// Derive from isOn so the listing always matches what is rendered.
+				const perTool = TOOL_NAMES.map((t) =>
+					isOn(t) ? `${t}(compact)` : `${t}(full)`,
+				).join(", ");
 				ctx.ui.notify(`toolview: ${status} — ${perTool}`, "info");
 				return;
 			}
@@ -683,10 +698,13 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				if (action === "compact" || action === "full") {
-					if (action === "compact") {
+					const want = action === "compact";
+					// Record the override only when it differs from the global default,
+					// so the state file stays a set of genuine exceptions.
+					if (want === state.enabled) {
 						delete state.tools[tool];
 					} else {
-						state.tools[tool] = false;
+						state.tools[tool] = want;
 					}
 					saveState(state);
 					refresh();
@@ -704,16 +722,16 @@ export default function (pi: ExtensionAPI) {
 					);
 					return;
 				}
-				const currentlyOn = state.tools[tool] !== false;
-				if (currentlyOn) {
-					state.tools[tool] = false;
-				} else {
+				const want = !isOn(tool);
+				if (want === state.enabled) {
 					delete state.tools[tool];
+				} else {
+					state.tools[tool] = want;
 				}
 				saveState(state);
 				refresh();
 				ctx.ui.notify(
-					`toolview: ${tool} → ${currentlyOn ? "full" : "compact"}`,
+					`toolview: ${tool} → ${want ? "compact" : "full"}`,
 					"info",
 				);
 				return;

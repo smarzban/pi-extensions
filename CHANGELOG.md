@@ -6,6 +6,11 @@ Each package is versioned and released independently under `packages/<name>`, vi
 
 ## Unreleased
 
+### pi-toolview
+
+- New package: compact one-line tool output for pi's seven built-in tools, expandable on demand,
+  with `/toolview compact|full` globally or per tool.
+
 ### Monorepo
 
 - Release workflow publishes any package from a per-package tag (`pi-<name>-vX.Y.Z`); each package
