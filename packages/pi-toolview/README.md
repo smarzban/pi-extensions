@@ -102,7 +102,7 @@ Want to keep some tools at default? Use `/toolview bash full` to show full outpu
 - `/toolview` toggles re-render already-drawn blocks immediately, no `/reload` needed
 - Only `renderCall()` and `renderResult()` are custom (TUI display only)
 - The LLM still receives full, unmodified `result.content`
-- When disabled via `/toolview`, falls back to the original tool's renderer
+- When set to `full` via `/toolview`, the complete output is drawn through the same pill row (not through the native renderer, see above)
 - State reconstruction from session history works normally
 
 ## License

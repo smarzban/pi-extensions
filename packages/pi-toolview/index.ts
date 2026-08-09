@@ -59,7 +59,9 @@ function displayPath(p: string, cwd: string): string {
 	const home = process.env.HOME || process.env.USERPROFILE;
 	const rel = relative(cwd, p);
 	if (!rel.startsWith("..") && !rel.startsWith(sep + "..")) return rel || ".";
-	if (home && p.startsWith(home)) return `~${p.slice(home.length)}`;
+	// Match HOME on a path boundary: a bare prefix test turns /home/user2/x into ~2/x.
+	if (home && (p === home || p.startsWith(home + sep)))
+		return `~${p.slice(home.length)}`;
 	return p;
 }
 
@@ -181,7 +183,7 @@ function parseFuncName(ctx: string): string | null {
 	];
 	for (const pat of patterns) {
 		const m = ctx.match(pat);
-		if (m?.[1] && !["if", "for", "while", "switch", "catch"].includes(m[1])) {
+		if (m?.[1] && !["if", "for", "while", "switch", "catch", "return"].includes(m[1])) {
 			return m[1];
 		}
 	}
@@ -194,7 +196,13 @@ type ToolName = "bash" | "read" | "edit" | "write" | "grep" | "find" | "ls";
 const TOOL_NAMES: ToolName[] = ["bash", "read", "edit", "write", "grep", "find", "ls"];
 
 interface CompactState {
+	/** Global default when a tool has no override of its own. */
 	enabled: boolean;
+	/**
+	 * Per-tool override of the global default. `true` forces compact, `false`
+	 * forces full, absent follows `enabled`. Both directions must be
+	 * representable, otherwise a per-tool command cannot escape the global mode.
+	 */
 	tools: Partial<Record<ToolName, boolean>>;
 }
 
@@ -240,10 +248,10 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	const state = loadState();
-	const isOn = (t: ToolName): boolean =>
-		state.enabled && state.tools[t] !== false;
+	// A per-tool override wins over the global default in both directions.
+	const isOn = (t: ToolName): boolean => state.tools[t] ?? state.enabled;
 
-	const d = (p: string) => displayPath(p, cwd);
+	const d = (p: string, toolCwd: string) => displayPath(p, toolCwd);
 
 	const toolLabel = (theme: any, label: string) =>
 		theme.fg("toolTitle", theme.bold(label));
@@ -274,8 +282,8 @@ export default function (pi: ExtensionAPI) {
 		parameters: originals.bash.parameters,
 		renderShell: "self",
 
-		async execute(id, params, signal, onUpdate) {
-			return originals.bash.execute(id, params, signal, onUpdate);
+		async execute(id, params, signal, onUpdate, ctx) {
+			return createBashTool(ctx.cwd).execute(id, params, signal, onUpdate);
 		},
 
 		renderCall(args, theme, context) {
@@ -340,12 +348,12 @@ export default function (pi: ExtensionAPI) {
 		parameters: originals.read.parameters,
 		renderShell: "self",
 
-		async execute(id, params, signal, onUpdate) {
-			return originals.read.execute(id, params, signal, onUpdate);
+		async execute(id, params, signal, onUpdate, ctx) {
+			return createReadTool(ctx.cwd).execute(id, params, signal, onUpdate);
 		},
 
 		renderCall(args, theme, context) {
-			let t = `${toolLabel(theme, "read")} ${theme.fg("accent", d(args.path))}`;
+			let t = `${toolLabel(theme, "read")} ${theme.fg("accent", d(args.path, context.cwd))}`;
 			if (args.offset !== undefined || args.limit !== undefined) {
 				const bits: string[] = [];
 				if (args.offset) bits.push(`offset=${args.offset}`);
@@ -362,8 +370,11 @@ export default function (pi: ExtensionAPI) {
 			if (content?.type === "image")
 				return row(theme.fg("success", "Image loaded"), theme, context, false);
 			if (context.isError) {
-				const firstLine = content?.type === "text" ? content.text.split("\n")[0] : "Read failed";
-				return row(theme.fg("error", `✗ ${firstLine}`), theme, context, false);
+				const full = content?.type === "text" ? content.text.trimEnd() : "Read failed";
+				// Full mode must show the whole diagnostic: a failure is when the user
+				// most wants it, so the error branch cannot pre-empt it.
+				const body = isOn("read") ? full.split("\n")[0] : full;
+				return row(theme.fg("error", `✗ ${body}`), theme, context, false);
 			}
 			if (content?.type !== "text")
 				return row(theme.fg("error", "✗ No content"), theme, context, false);
@@ -375,7 +386,7 @@ export default function (pi: ExtensionAPI) {
 
 			// ON: compact summary.
 			const details = result.details as ReadToolDetails | undefined;
-			const lines = content.text.split("\n").length;
+			const lines = lineCount(content.text);
 			let t = theme.fg("success", `${lines} line${lines === 1 ? "" : "s"}`);
 			if (details?.truncation?.truncated)
 				t += theme.fg("warning", ` (truncated from ${details.truncation.totalLines})`);
@@ -398,13 +409,13 @@ export default function (pi: ExtensionAPI) {
 		parameters: originals.edit.parameters,
 		renderShell: "self",
 
-		async execute(id, params, signal, onUpdate) {
-			return originals.edit.execute(id, params, signal, onUpdate);
+		async execute(id, params, signal, onUpdate, ctx) {
+			return createEditTool(ctx.cwd).execute(id, params, signal, onUpdate);
 		},
 
 		renderCall(args, theme, context) {
 			const n = args.edits?.length ?? 1;
-			const t = `${toolLabel(theme, "edit")} ${theme.fg("accent", d(args.path))}${theme.fg("dim", ` (${n} change${n === 1 ? "" : "s"})`)}`;
+			const t = `${toolLabel(theme, "edit")} ${theme.fg("accent", d(args.path, context.cwd))}${theme.fg("dim", ` (${n} change${n === 1 ? "" : "s"})`)}`;
 			return row(t, theme, context, context.isPartial);
 		},
 
@@ -413,8 +424,10 @@ export default function (pi: ExtensionAPI) {
 
 			const details = result.details as EditToolDetails | undefined;
 			const text = textOf(result);
-			if (context.isError)
-				return row(theme.fg("error", `✗ ${text.split("\n")[0] || "Edit failed"}`), theme, context, false);
+			if (context.isError) {
+				const body = isOn("edit") ? text.split("\n")[0] : text.trimEnd();
+				return row(theme.fg("error", `✗ ${body || "Edit failed"}`), theme, context, false);
+			}
 
 			// OFF: full colored diff in the pill.
 			if (!isOn("edit")) {
@@ -452,22 +465,24 @@ export default function (pi: ExtensionAPI) {
 		parameters: originals.write.parameters,
 		renderShell: "self",
 
-		async execute(id, params, signal, onUpdate) {
-			return originals.write.execute(id, params, signal, onUpdate);
+		async execute(id, params, signal, onUpdate, ctx) {
+			return createWriteTool(ctx.cwd).execute(id, params, signal, onUpdate);
 		},
 
 		renderCall(args, theme, context) {
 			const lines = args.content.split("\n").length;
 			const size = new TextEncoder().encode(args.content).length;
-			const t = `${toolLabel(theme, "write")} ${theme.fg("accent", d(args.path))}${theme.fg("dim", ` (${lines} lines · ${formatBytes(size)})`)}`;
+			const t = `${toolLabel(theme, "write")} ${theme.fg("accent", d(args.path, context.cwd))}${theme.fg("dim", ` (${lines} lines · ${formatBytes(size)})`)}`;
 			return row(t, theme, context, context.isPartial);
 		},
 
 		renderResult(result, opts, theme, context) {
 			if (opts.isPartial) return row(theme.fg("dim", "Writing…"), theme, context, true);
 			const text = textOf(result);
-			if (context.isError)
-				return row(theme.fg("error", `✗ ${text.split("\n")[0] || "Write failed"}`), theme, context, false);
+			if (context.isError) {
+				const body = isOn("write") ? text.split("\n")[0] : text.trimEnd();
+				return row(theme.fg("error", `✗ ${body || "Write failed"}`), theme, context, false);
+			}
 
 			// OFF: full result message in the pill.
 			if (!isOn("write")) {
@@ -487,13 +502,13 @@ export default function (pi: ExtensionAPI) {
 		parameters: originals.grep.parameters,
 		renderShell: "self",
 
-		async execute(id, params, signal, onUpdate) {
-			return originals.grep.execute(id, params, signal, onUpdate);
+		async execute(id, params, signal, onUpdate, ctx) {
+			return createGrepTool(ctx.cwd).execute(id, params, signal, onUpdate);
 		},
 
 		renderCall(args, theme, context) {
 			let t = `${toolLabel(theme, "grep")} ${theme.fg("accent", `/${args.pattern}/`)}`;
-			if (args.path) t += theme.fg("dim", ` in ${d(args.path)}`);
+			if (args.path) t += theme.fg("dim", ` in ${d(args.path, context.cwd)}`);
 			if (args.glob) t += theme.fg("dim", ` --glob=${args.glob}`);
 			return row(t, theme, context, context.isPartial);
 		},
@@ -502,6 +517,11 @@ export default function (pi: ExtensionAPI) {
 			if (opts.isPartial) return row(theme.fg("dim", "Searching…"), theme, context, true);
 
 			const text = textOf(result);
+
+			if (context.isError) {
+				const body = isOn("grep") ? text.split("\n")[0] : text.trimEnd();
+				return row(theme.fg("error", `✗ ${body || "grep failed"}`), theme, context, false);
+			}
 
 			// OFF: full match list in the pill.
 			if (!isOn("grep")) {
@@ -537,13 +557,13 @@ export default function (pi: ExtensionAPI) {
 		parameters: originals.find.parameters,
 		renderShell: "self",
 
-		async execute(id, params, signal, onUpdate) {
-			return originals.find.execute(id, params, signal, onUpdate);
+		async execute(id, params, signal, onUpdate, ctx) {
+			return createFindTool(ctx.cwd).execute(id, params, signal, onUpdate);
 		},
 
 		renderCall(args, theme, context) {
 			let t = `${toolLabel(theme, "find")} ${theme.fg("accent", args.pattern)}`;
-			if (args.path) t += theme.fg("dim", ` in ${d(args.path)}`);
+			if (args.path) t += theme.fg("dim", ` in ${d(args.path, context.cwd)}`);
 			if (args.limit) t += theme.fg("dim", ` (limit ${args.limit})`);
 			return row(t, theme, context, context.isPartial);
 		},
@@ -552,6 +572,11 @@ export default function (pi: ExtensionAPI) {
 			if (opts.isPartial) return row(theme.fg("dim", "Searching…"), theme, context, true);
 
 			const text = textOf(result);
+
+			if (context.isError) {
+				const body = isOn("find") ? text.split("\n")[0] : text.trimEnd();
+				return row(theme.fg("error", `✗ ${body || "find failed"}`), theme, context, false);
+			}
 
 			// OFF: full path list in the pill.
 			if (!isOn("find")) {
@@ -587,12 +612,12 @@ export default function (pi: ExtensionAPI) {
 		parameters: originals.ls.parameters,
 		renderShell: "self",
 
-		async execute(id, params, signal, onUpdate) {
-			return originals.ls.execute(id, params, signal, onUpdate);
+		async execute(id, params, signal, onUpdate, ctx) {
+			return createLsTool(ctx.cwd).execute(id, params, signal, onUpdate);
 		},
 
 		renderCall(args, theme, context) {
-			const target = args.path ? d(args.path) : ".";
+			const target = args.path ? d(args.path, context.cwd) : ".";
 			let t = `${toolLabel(theme, "ls")} ${theme.fg("accent", target)}`;
 			if (args.limit) t += theme.fg("dim", ` (limit ${args.limit})`);
 			return row(t, theme, context, context.isPartial);
@@ -602,6 +627,11 @@ export default function (pi: ExtensionAPI) {
 			if (opts.isPartial) return row(theme.fg("dim", "Listing…"), theme, context, true);
 
 			const text = textOf(result);
+
+			if (context.isError) {
+				const body = isOn("ls") ? text.split("\n")[0] : text.trimEnd();
+				return row(theme.fg("error", `✗ ${body || "ls failed"}`), theme, context, false);
+			}
 
 			// OFF: full entry list in the pill.
 			if (!isOn("ls")) {
@@ -632,11 +662,18 @@ export default function (pi: ExtensionAPI) {
 			"Compact vs full tool output. /toolview compact · /toolview bash full",
 		handler: async (args, ctx) => {
 			// Re-render already-drawn tool blocks so a toggle applies immediately.
+			// pi's setToolsExpanded returns early when the value is unchanged
+			// (interactive-mode.js: `if (expanded === this.toolOutputExpanded) return`),
+			// so setting it to its current value re-renders nothing. Flip it and flip
+			// it straight back: each call rebuilds every tool block through its
+			// renderer, and the pair leaves the expansion state where it started.
 			const refresh = () => {
 				try {
-					ctx.ui.setToolsExpanded(ctx.ui.getToolsExpanded());
+					const current = ctx.ui.getToolsExpanded();
+					ctx.ui.setToolsExpanded(!current);
+					ctx.ui.setToolsExpanded(current);
 				} catch {
-					// non-fatal: toggle still applies to newly-rendered tools
+					// non-fatal: the change still applies to newly-rendered tools
 				}
 			};
 			// Accept "compact"/"full" as primary, "on"/"off" as legacy aliases.
@@ -645,10 +682,10 @@ export default function (pi: ExtensionAPI) {
 
 			if (!raw) {
 				const status = state.enabled ? "compact" : "full";
-				const perTool = TOOL_NAMES.map((t) => {
-					const on = state.tools[t] !== false;
-					return on ? t : `${t}(full)`;
-				}).join(", ");
+				// Derive from isOn so the listing always matches what is rendered.
+				const perTool = TOOL_NAMES.map((t) =>
+					isOn(t) ? `${t}(compact)` : `${t}(full)`,
+				).join(", ");
 				ctx.ui.notify(`toolview: ${status} — ${perTool}`, "info");
 				return;
 			}
@@ -683,10 +720,13 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				if (action === "compact" || action === "full") {
-					if (action === "compact") {
+					const want = action === "compact";
+					// Record the override only when it differs from the global default,
+					// so the state file stays a set of genuine exceptions.
+					if (want === state.enabled) {
 						delete state.tools[tool];
 					} else {
-						state.tools[tool] = false;
+						state.tools[tool] = want;
 					}
 					saveState(state);
 					refresh();
@@ -704,16 +744,16 @@ export default function (pi: ExtensionAPI) {
 					);
 					return;
 				}
-				const currentlyOn = state.tools[tool] !== false;
-				if (currentlyOn) {
-					state.tools[tool] = false;
-				} else {
+				const want = !isOn(tool);
+				if (want === state.enabled) {
 					delete state.tools[tool];
+				} else {
+					state.tools[tool] = want;
 				}
 				saveState(state);
 				refresh();
 				ctx.ui.notify(
-					`toolview: ${tool} → ${currentlyOn ? "full" : "compact"}`,
+					`toolview: ${tool} → ${want ? "compact" : "full"}`,
 					"info",
 				);
 				return;
