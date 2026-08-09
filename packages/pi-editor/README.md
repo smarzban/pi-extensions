@@ -23,6 +23,11 @@ the top or bottom border, toggled per command:
 | `/editor name on` / `/editor name off` | Toggle the session name label |
 | `/editor name top` / `/editor name bottom` | Label position |
 
+The box is on as soon as the package is installed; `/editor off` turns it off
+and the choice sticks. If you had previously turned the old pi-statusline box
+off, that preference lived in `statusline.json` and does not carry over: turn it
+off once here.
+
 Settings persist to `~/.pi/agent/editor.json` (`enabled`, `sessionName`,
 `sessionNamePosition`).
 

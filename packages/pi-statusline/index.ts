@@ -608,7 +608,9 @@ export default function (pi: ExtensionAPI) {
 			prNumber != null ? bracket(theme, theme.fg("accent", `#${prNumber}`)) : "";
 
 		// Session name (first segment, when named and enabled): ⚑ name
-		const nameNow = sessionName || ctx.sessionManager.getSessionName() || undefined;
+		// Live session first: the module-level cache is shared by every session in this
+		// process, so an unnamed session could otherwise inherit another one's name.
+		const nameNow = ctx.sessionManager.getSessionName() || sessionName || undefined;
 		const nameSeg =
 			sessionNameEnabled && nameNow
 				? bracket(theme, theme.fg("accent", `⚑ ${nameNow}`))

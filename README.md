@@ -16,7 +16,7 @@ Each package under `packages/` is independent: its own `package.json`, entrypoin
 | Package | npm | Description |
 |---------|-----|-------------|
 | [pi-pacman](packages/pi-pacman) | [`@pi-extensions/pi-pacman`](https://www.npmjs.com/package/@pi-extensions/pi-pacman) | Pac-Man working / thinking indicator |
-| [pi-statusline](packages/pi-statusline) | [`@pi-extensions/pi-statusline`](https://www.npmjs.com/package/@pi-extensions/pi-statusline) | Rounded editor box with bottom-right session name; model/effort, context, usage, git/PR footer |
+| [pi-statusline](packages/pi-statusline) | [`@pi-extensions/pi-statusline`](https://www.npmjs.com/package/@pi-extensions/pi-statusline) | Footer statusline: model/effort, context, cost, provider usage, git branch/diff and PR |
 | [pi-toolview](packages/pi-toolview) | [`@pi-extensions/pi-toolview`](https://www.npmjs.com/package/@pi-extensions/pi-toolview) | Compact tool output: one-line summaries (expandable) instead of raw output |
 | [pi-editor](packages/pi-editor) | [`@pi-extensions/pi-editor`](https://www.npmjs.com/package/@pi-extensions/pi-editor) | Rounded input editor box + draft stash (ctrl+s, per project) |
 

@@ -30,7 +30,14 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 
 // ── persisted settings ───────────────────────────────────────────────
@@ -88,16 +95,35 @@ function loadStashes(): StashFile {
 		const raw = JSON.parse(readFileSync(path, "utf-8"));
 		return { stashes: raw.stashes ?? {} };
 	} catch {
+		// Unreadable or truncated: keep the bytes instead of letting the next save
+		// overwrite every project's draft with an empty map.
+		try {
+			renameSync(path, `${path}.corrupt-${Date.now()}`);
+		} catch {
+			// If it cannot be set aside, saveStashes will fail loudly rather than clobber it.
+		}
 		return { stashes: {} };
 	}
 }
 
-function saveStashes(file: StashFile): void {
+/** Persist the stash file atomically. Returns false when nothing was written. */
+function saveStashes(file: StashFile): boolean {
+	const path = stashPath();
+	const temp = `${path}.tmp-${process.pid}`;
 	try {
-		mkdirSync(dirname(stashPath()), { recursive: true });
-		writeFileSync(stashPath(), `${JSON.stringify(file, null, "\t")}\n`, "utf-8");
+		mkdirSync(dirname(path), { recursive: true });
+		// Write beside the target, then rename over it: a crash mid-write leaves the
+		// previous file intact instead of a truncated one.
+		writeFileSync(temp, `${JSON.stringify(file, null, "\t")}\n`, "utf-8");
+		renameSync(temp, path);
+		return true;
 	} catch {
-		// non-fatal: stash is best-effort
+		try {
+			if (existsSync(temp)) unlinkSync(temp);
+		} catch {
+			// best-effort temp cleanup
+		}
+		return false;
 	}
 }
 
@@ -200,7 +226,13 @@ export default function (pi: ExtensionAPI) {
 				const extra = bottomIndex === -1 ? [] : lines.slice(bottomIndex + 1);
 
 				const result: string[] = [];
-				const name = sessionName ?? pi.getSessionName() ?? undefined;
+				// Live session first: a module-level cache is shared by every session in
+				// this process and would otherwise show another session's name.
+				const name =
+					ctx.sessionManager.getSessionName() ||
+					pi.getSessionName() ||
+					sessionName ||
+					undefined;
 				const label = name ? ctx.ui.theme.fg("accent", name) : "";
 
 				// Top border: plain, or right-aligned session name when configured.
@@ -244,7 +276,12 @@ export default function (pi: ExtensionAPI) {
 
 			if (text.trim()) {
 				file.stashes[key] = { text, savedAt: new Date().toISOString() };
-				saveStashes(file);
+				// Only clear the editor once the draft is safely on disk: an unwritable
+				// agent dir must not cost the user their text.
+				if (!saveStashes(file)) {
+					ctx.ui.notify("Could not write the stash: draft kept in the editor", "error");
+					return;
+				}
 				ctx.ui.setEditorText("");
 				ctx.ui.notify(`Stashed ${text.length} chars`, "info");
 			} else {
@@ -252,8 +289,16 @@ export default function (pi: ExtensionAPI) {
 				if (entry) {
 					ctx.ui.setEditorText(entry.text);
 					delete file.stashes[key];
-					saveStashes(file);
-					ctx.ui.notify(`Restored stash (${entry.text.length} chars)`, "info");
+					// The text is back in the editor either way; a failed delete only means
+					// the one-shot entry survives, so say so rather than claiming success.
+					if (saveStashes(file)) {
+						ctx.ui.notify(`Restored stash (${entry.text.length} chars)`, "info");
+					} else {
+						ctx.ui.notify(
+							`Restored stash (${entry.text.length} chars), but it could not be cleared from disk`,
+							"error",
+						);
+					}
 				} else {
 					ctx.ui.notify("No stash for this project", "info");
 				}
@@ -266,6 +311,13 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		sessionName = ctx.sessionManager.getSessionName() ?? pi.getSessionName();
 		applyEditor(ctx);
+	});
+
+	// The editor component is bound from session_start, which pi re-emits on resume,
+	// fork, and reload. This mirrors the equivalent guard kept in pi-statusline and
+	// costs nothing when the component is already bound.
+	pi.on("model_select", async (_event, ctx) => {
+		if (enabled && ctx.hasUI && !tuiRef) applyEditor(ctx);
 	});
 
 	pi.on("session_info_changed", async (event) => {
@@ -352,8 +404,11 @@ export default function (pi: ExtensionAPI) {
 
 			if (raw === "clear") {
 				delete file.stashes[key];
-				saveStashes(file);
-				ctx.ui.notify("stash: cleared", "info");
+				if (saveStashes(file)) {
+					ctx.ui.notify("stash: cleared", "info");
+				} else {
+					ctx.ui.notify("stash: could not be cleared (write failed)", "error");
+				}
 				return;
 			}
 
