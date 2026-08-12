@@ -20,7 +20,7 @@ import {
 	type ExtensionContext,
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { getCapabilities, hyperlink, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 // ── types ────────────────────────────────────────────────────────────
 
@@ -48,6 +48,11 @@ interface GitState {
 	unstaged: number;
 	/** Untracked files (?) */
 	untracked: number;
+}
+
+interface PullRequest {
+	number: number;
+	url: string;
 }
 
 // ── constants ────────────────────────────────────────────────────────
@@ -367,23 +372,31 @@ function readGit(cwd: string): GitState | null {
  * Async so the TUI event loop never blocks on a GitHub API round-trip.
  * Result tri-state: `undefined` = lookup failed (caller keeps the current
  * value), `null` = definitively no open PR (merged/closed/none — caller
- * clears the segment), number = open PR.
+ * clears the segment), PullRequest = open PR.
  */
-function readPrNumber(cwd: string, branch: string): Promise<number | null | undefined> {
+function readPr(cwd: string, branch: string): Promise<PullRequest | null | undefined> {
 	return new Promise((resolve) => {
 		execFile(
 			"gh",
-			["pr", "list", "--head", branch, "--state", "open", "--json", "number", "--limit", "1"],
+			["pr", "list", "--head", branch, "--state", "open", "--json", "number,url", "--limit", "1"],
 			{ cwd, encoding: "utf8", timeout: 5000 },
 			(error, stdout) => {
 				// `gh pr list` returns [] when this branch has no open PR, so a
 				// merged or closed PR is distinguishable from a failed lookup.
 				if (error) return resolve(undefined);
 				try {
-					const data = JSON.parse(stdout.trim() || "[]") as Array<{ number?: unknown }>;
+					const data = JSON.parse(stdout.trim() || "[]") as Array<{
+						number?: unknown;
+						url?: unknown;
+					}>;
 					if (data.length === 0) return resolve(null);
-					const n = Number(data[0]?.number);
-					resolve(Number.isFinite(n) ? n : undefined);
+					const number = Number(data[0]?.number);
+					const url = data[0]?.url;
+					resolve(
+						Number.isFinite(number) && typeof url === "string" && url
+							? { number, url }
+							: undefined,
+					);
 				} catch {
 					resolve(undefined);
 				}
@@ -403,8 +416,8 @@ export default function (pi: ExtensionAPI) {
 	let thinkingLevel = "off";
 	let sessionName: string | undefined;
 	let git: GitState | null = null;
-	let prNumber: number | null = null;
-	/** Branch that `prNumber` was resolved for. */
+	let pr: PullRequest | null = null;
+	/** Branch that `pr` was resolved for. */
 	let prBranch: string | null = null;
 	/** Last PR lookup, used to debounce the per-turn refresh. */
 	let lastPrLookupAt = 0;
@@ -472,24 +485,29 @@ export default function (pi: ExtensionAPI) {
 	const refreshPr = (cwd: string, force = false) => {
 		const branch = git?.branch ?? null;
 		const branchChanged = branch !== prBranch;
+		if (branchChanged && pr !== null) {
+			pr = null;
+			tuiRef?.requestRender();
+		}
 		if (!force && !branchChanged && Date.now() - lastPrLookupAt < PR_REFRESH_MS) return;
 		if (prLookupInFlight) return;
 		prBranch = branch;
 		lastPrLookupAt = Date.now();
-		if (!branch) {
-			if (prNumber !== null) {
-				prNumber = null;
-				tuiRef?.requestRender();
-			}
-			return;
-		}
+		if (!branch) return;
 		prLookupInFlight = true;
-		readPrNumber(cwd, branch)
-			.then((n) => {
+		readPr(cwd, branch)
+			.then((nextPr) => {
 				prLookupInFlight = false;
-				if ((git?.branch ?? null) !== branch) return; // branch moved on; discard
-				if (n === undefined || n === prNumber) return; // failed or unchanged
-				prNumber = n;
+				if ((git?.branch ?? null) !== branch) {
+					refreshPr(cwd, true);
+					return; // branch moved on; discard and refresh it
+				}
+				if (
+					nextPr === undefined ||
+					(nextPr?.number === pr?.number && nextPr?.url === pr?.url)
+				)
+					return; // failed or unchanged
+				pr = nextPr;
 				tuiRef?.requestRender();
 			})
 			.catch(() => {
@@ -603,9 +621,12 @@ export default function (pi: ExtensionAPI) {
 			gitSeg = bracket(theme, g);
 		}
 
-		// Open PR only; merged and closed PRs are omitted.
-		const prSeg =
-			prNumber != null ? bracket(theme, theme.fg("accent", `#${prNumber}`)) : "";
+		// Open PR only; merged and closed PRs are omitted. Link supported terminals
+		// directly to the PR, while leaving the same plain text elsewhere.
+		const prText = pr ? theme.fg("accent", `#${pr.number}`) : "";
+		const prSeg = pr
+			? bracket(theme, getCapabilities().hyperlinks ? hyperlink(prText, pr.url) : prText)
+			: "";
 
 		// Session name (first segment, when named and enabled): ⚑ name
 		// Live session first: the module-level cache is shared by every session in this
@@ -736,7 +757,7 @@ export default function (pi: ExtensionAPI) {
 					`effort=${thinkingLevel}`,
 					`usage=${usageStr}`,
 					`branch=${git?.branch ?? "none"}`,
-					`pr=${prNumber ?? "none"}`,
+					`pr=${pr?.number ?? "none"}`,
 				];
 				ctx.ui.notify(segs.join(" · "), "info");
 				return;
