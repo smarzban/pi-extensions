@@ -5,7 +5,7 @@ Light map of how this monorepo and its packages fit together. Not a deep design 
 ## Monorepo
 
 ```
-pi-extensions (git + npm org @pi-extensions)
+pi-extensions (git + npm scope @smarzban)
 └── packages/
     ├── pi-pacman        ← Pac-Man working indicator
     └── pi-statusline    ← rounded editor box + footer statusline
@@ -71,7 +71,7 @@ Both affect **interactive UI only** (working indicator / footer), never the agen
 ## Releases
 
 ```
-tag pi-<name>-vX.Y.Z on main ──► release.yml ──► OIDC ──► npm publish @pi-extensions/<name>
+tag pi-<name>-vX.Y.Z on main ──► release.yml ──► OIDC ──► npm publish @smarzban/<name>
 ```
 
 See [releases.md](releases.md).

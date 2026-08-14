@@ -5,7 +5,7 @@ Fastest path to Pac-Man on pi’s working line.
 ## 1. Install
 
 ```bash
-pi install npm:@pi-extensions/pi-pacman
+pi install npm:@smarzban/pi-pacman
 ```
 
 Requires [pi](https://github.com/earendil-works/pi) with interactive (TUI) mode. The indicator only appears while the agent is **streaming a normal response**, not during compaction/retry loaders.

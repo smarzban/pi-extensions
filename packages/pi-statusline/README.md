@@ -1,4 +1,4 @@
-# @pi-extensions/pi-statusline
+# @smarzban/pi-statusline
 
 Custom **statusline** for [pi](https://github.com/earendil-works/pi): a footer with model/effort, context, provider remaining, git branch, PR, and diff.
 
@@ -23,7 +23,7 @@ Part of the [pi-extensions](https://github.com/smarzban/pi-extensions) monorepo.
 ## Quickstart
 
 ```bash
-pi install npm:@pi-extensions/pi-statusline
+pi install npm:@smarzban/pi-statusline
 # or local
 pi install /absolute/path/to/pi-extensions/packages/pi-statusline
 ```
@@ -115,7 +115,7 @@ Yes, pi exposes per-assistant-message `usage.cost.total` (USD estimate from mode
 
 | Method | Loads | Command |
 |--------|-------|---------|
-| **npm** (recommended) | This package only | `pi install npm:@pi-extensions/pi-statusline` |
+| **npm** (recommended) | This package only | `pi install npm:@smarzban/pi-statusline` |
 | **local** | This package only | `pi install /absolute/path/to/pi-extensions/packages/pi-statusline` |
 | **git** (whole monorepo) | All packages in the repo | `pi install git:github.com/smarzban/pi-extensions` |
 

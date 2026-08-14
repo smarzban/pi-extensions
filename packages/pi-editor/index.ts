@@ -18,7 +18,7 @@
  *   /stash [clear]            Stash status / clear
  *
  * Install:
- *   pi install npm:@pi-extensions/pi-editor
+ *   pi install npm:@smarzban/pi-editor
  */
 
 import {

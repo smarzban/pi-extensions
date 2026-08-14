@@ -64,7 +64,7 @@ touched.
 ## Install
 
 ```bash
-pi install npm:@pi-extensions/pi-editor
+pi install npm:@smarzban/pi-editor
 ```
 
 ## Shortcut note

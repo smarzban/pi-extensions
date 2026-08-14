@@ -1,5 +1,5 @@
 {
-  "name": "@pi-extensions/pi-toolview",
+  "name": "@smarzban/pi-toolview",
   "version": "0.1.0",
   "description": "Compact tool output display for pi — one-line summaries instead of raw output, expandable on demand",
   "license": "MIT",

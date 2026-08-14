@@ -1,5 +1,5 @@
 {
-	"name": "@pi-extensions/pi-editor",
+	"name": "@smarzban/pi-editor",
 	"version": "0.1.0",
 	"description": "Rounded input editor box + draft stash (alt+s saves/restores the editor draft per project)",
 	"type": "module",
