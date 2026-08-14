@@ -1,9 +1,7 @@
 # Releases
 
 Each package under `packages/*` is published to npm (user scope: **@smarzban**) **independently**, with
-its own version and its own git tag. Same pattern as
-[empanel](https://github.com/smarzban/empanel): **tag → GitHub Actions → OIDC trusted publishing**.
-No long-lived npm token in the repo.
+its own version and its own git tag. No long-lived npm token in the repo.
 
 ## Tag scheme
 
