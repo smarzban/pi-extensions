@@ -10,7 +10,7 @@
 #
 # ARMED BUT UNFIRED for a package until BOTH one-time maintainer steps are done (see docs/releases.md):
 #   1. First-publish that package once (granular token w/ bypass 2FA, or OTP) so it exists under the
-#      pi-extensions npm org (trusted publishers can only attach to an existing package).
+#      @smarzban npm scope (trusted publishers can only attach to an existing package).
 #   2. On npmjs.com -> the package -> Settings -> Trusted Publisher:
 #        Organization/user: smarzban
 #        Repository:        pi-extensions

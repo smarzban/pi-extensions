@@ -1,5 +1,5 @@
 {
-	"name": "@pi-extensions/pi-statusline",
+	"name": "@smarzban/pi-statusline",
 	"version": "0.2.0",
 	"description": "Custom pi footer: session name, model/effort, context, provider usage, git branch/PR/diff",
 	"type": "module",

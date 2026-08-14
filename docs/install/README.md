@@ -17,14 +17,14 @@ repo into pi; it is not the way to pick a single package.
 Installs **one package** per command. Run only the line(s) you want:
 
 ```bash
-pi install npm:@pi-extensions/pi-pacman
-pi install npm:@pi-extensions/pi-statusline
+pi install npm:@smarzban/pi-pacman
+pi install npm:@smarzban/pi-statusline
 ```
 
 Pin a version:
 
 ```bash
-pi install npm:@pi-extensions/pi-pacman@0.1.0
+pi install npm:@smarzban/pi-pacman@0.1.0
 ```
 
 ## git (whole monorepo)
@@ -72,7 +72,7 @@ pi --extension ./index.ts
 ## Uninstall
 
 ```bash
-pi remove npm:@pi-extensions/pi-pacman
+pi remove npm:@smarzban/pi-pacman
 # or the exact source string shown by:
 pi list
 ```

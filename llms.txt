@@ -1,6 +1,6 @@
 # pi-extensions
 
-> Monorepo of pi (terminal coding agent) extensions. npm org @pi-extensions. Each package under packages/ is independently installable.
+> Monorepo of pi (terminal coding agent) extensions. npm scope @smarzban. Each package under packages/ is independently installable.
 
 ## Docs
 
@@ -16,8 +16,8 @@
 
 ## Packages
 
-- [pi-pacman](packages/pi-pacman/README.md): npm `@pi-extensions/pi-pacman`
-- [pi-statusline](packages/pi-statusline/README.md): npm `@pi-extensions/pi-statusline`
+- [pi-pacman](packages/pi-pacman/README.md): npm `@smarzban/pi-pacman`
+- [pi-statusline](packages/pi-statusline/README.md): npm `@smarzban/pi-statusline`
 
 ## Project
 

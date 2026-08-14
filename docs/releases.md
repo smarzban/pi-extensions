@@ -1,6 +1,6 @@
 # Releases
 
-Each package under `packages/*` is published to npm (org: **pi-extensions**) **independently**, with
+Each package under `packages/*` is published to npm (user scope: **@smarzban**) **independently**, with
 its own version and its own git tag. Same pattern as
 [empanel](https://github.com/smarzban/empanel): **tag → GitHub Actions → OIDC trusted publishing**.
 No long-lived npm token in the repo.
@@ -12,8 +12,8 @@ version.
 
 | Tag | Publishes |
 |-----|-----------|
-| `pi-pacman-v0.1.1` | `packages/pi-pacman` → `@pi-extensions/pi-pacman@0.1.1` |
-| `pi-statusline-v0.2.0` | `packages/pi-statusline` → `@pi-extensions/pi-statusline@0.2.0` |
+| `pi-pacman-v0.1.1` | `packages/pi-pacman` → `@smarzban/pi-pacman@0.1.1` |
+| `pi-statusline-v0.2.0` | `packages/pi-statusline` → `@smarzban/pi-statusline@0.2.0` |
 
 `release.yml` parses the package directory and version from the tag, so **adding a package needs no
 workflow change**: just tag it once the package exists under `packages/`.
@@ -27,7 +27,7 @@ Do this **once per package**. Until it is done, that package's tags build but ca
 npm only lets you attach a Trusted Publisher to a package that **already exists**.
 
 With **passkey** 2FA (no 6-digit OTP), use a granular access token that can publish to the
-`pi-extensions` org and has **Bypass two-factor authentication** enabled:
+`@smarzban` scope and has **Bypass two-factor authentication** enabled:
 
 ```bash
 npm config set //registry.npmjs.org/:_authToken=npm_YOUR_TOKEN
@@ -47,7 +47,7 @@ npm publish --access public --otp=XXXXXX   # 6 digits only, not npm_…
 ### 2. Link Trusted Publisher on npmjs.com
 
 1. Open the package's page → **Settings** → **Trusted Publisher**
-   (e.g. https://www.npmjs.com/package/@pi-extensions/pi-pacman)
+   (e.g. https://www.npmjs.com/package/@smarzban/pi-pacman)
 2. Add GitHub Actions:
    - **Organization or user:** `smarzban`
    - **Repository:** `pi-extensions`
@@ -76,9 +76,9 @@ git push origin pi-pacman-v0.1.1
 4. Watch **Actions → release**. On success:
 
 ```bash
-pi install npm:@pi-extensions/pi-pacman
+pi install npm:@smarzban/pi-pacman
 # or pin
-pi install npm:@pi-extensions/pi-pacman@0.1.1
+pi install npm:@smarzban/pi-pacman@0.1.1
 ```
 
 ## What the workflow does
@@ -96,8 +96,8 @@ File: [`.github/workflows/release.yml`](../.github/workflows/release.yml)
 
 ```bash
 # One package (usual)
-pi install npm:@pi-extensions/pi-pacman
-pi install npm:@pi-extensions/pi-statusline
+pi install npm:@smarzban/pi-pacman
+pi install npm:@smarzban/pi-statusline
 pi install /path/to/pi-extensions/packages/pi-pacman
 
 # Whole monorepo (every package in root pi.extensions)

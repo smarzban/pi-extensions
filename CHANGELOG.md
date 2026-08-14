@@ -6,6 +6,10 @@ Each package is versioned and released independently under `packages/<name>`, vi
 
 ## Unreleased
 
+### All packages
+
+- **npm scope moved from `@pi-extensions` to `@smarzban`**. The old `@pi-extensions/pi-pacman` and `@pi-extensions/pi-statusline` packages are frozen at their last published versions; new releases ship only as `@smarzban/pi-*`. Reinstall with `pi install npm:@smarzban/pi-<name>`.
+
 ### pi-editor
 
 - New package: the rounded input editor box (moved out of pi-statusline) plus an `alt+s` draft stash, kept per project in `~/.pi/agent/stash.json`.

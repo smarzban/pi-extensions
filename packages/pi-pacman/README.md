@@ -1,4 +1,4 @@
-# @pi-extensions/pi-pacman
+# @smarzban/pi-pacman
 
 Pac-Man **working indicator** for [pi](https://github.com/earendil-works/pi): replaces the streaming spinner with pellet runs, ghost chases, arcade tunnels, and fruit bonuses.
 
@@ -17,7 +17,7 @@ Part of the [pi-extensions](https://github.com/smarzban/pi-extensions) monorepo.
 ## Quickstart
 
 ```bash
-pi install npm:@pi-extensions/pi-pacman
+pi install npm:@smarzban/pi-pacman
 ```
 
 Restart pi (or start a new session), send a message, and you should see a yellow `ᗧ` chomping pellets next to the working line:
@@ -34,7 +34,7 @@ The indicator only appears while the agent is **streaming a normal response**, n
 
 | Method | Loads | Command |
 |--------|-------|---------|
-| **npm** (recommended) | This package only | `pi install npm:@pi-extensions/pi-pacman` |
+| **npm** (recommended) | This package only | `pi install npm:@smarzban/pi-pacman` |
 | **local path** | This package only | `pi install /absolute/path/to/pi-extensions/packages/pi-pacman` |
 | **git** (whole monorepo) | All packages in the repo | `pi install git:github.com/smarzban/pi-extensions` |
 
