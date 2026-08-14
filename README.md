@@ -42,30 +42,6 @@ Other install methods:
 
 Details: [docs/install/](docs/install/README.md).
 
-## Documentation
-
-| Audience | Start here |
-|----------|------------|
-| **Users (per package)** | [packages/pi-pacman/README.md](packages/pi-pacman/README.md) · [docs/usage/](docs/usage/) |
-| **Install / release** | [docs/install/](docs/install/README.md) · [docs/releases.md](docs/releases.md) |
-| **Contributors** | [docs/development.md](docs/development.md) · [CONTRIBUTING.md](CONTRIBUTING.md) |
-| **Overview** | [docs/architecture.md](docs/architecture.md) · [docs/README.md](docs/README.md) |
-
-## Structure
-
-```
-pi-extensions/
-├── packages/
-│   └── pi-<name>/          # one installable pi package each
-│       ├── index.ts
-│       ├── package.json    # "pi": { "extensions": [...] }
-│       └── README.md
-├── docs/
-└── .github/workflows/      # CI + OIDC npm release on v* tags
-```
-
-Modeled after [ogulcancelik/pi-extensions](https://github.com/ogulcancelik/pi-extensions).
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Releases are tag-driven (per-package `pi-<name>-v*`) via GitHub Actions OIDC. See [docs/releases.md](docs/releases.md).
