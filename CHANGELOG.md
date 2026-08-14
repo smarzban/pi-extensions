@@ -4,30 +4,50 @@ All notable changes to packages in this monorepo are documented here.
 Each package is versioned and released independently under `packages/<name>`, via per-package tags
 `pi-<name>-vX.Y.Z` (see [docs/releases.md](docs/releases.md)).
 
-## Unreleased
-
-### pi-editor
-
-- New package: the rounded input editor box (moved out of pi-statusline) plus an `alt+s` draft stash, kept per project in `~/.pi/agent/stash.json`.
-
-### pi-statusline
-
-- **Breaking**: the rounded editor box moved to the new pi-editor package. `/statusline off` now restores the default footer only, and installing pi-statusline alone no longer draws the box. Release this as a minor bump.
-- Add `[N t/s]` (decode-only output rate of the last measurable response) and `[ttft …]` (wait before the reply started) footer segments, both on by default, toggled with `/statusline tps on|off` and `/statusline ttft on|off`.
-- Add an optional session name segment to the footer, toggled with `/statusline session on|off`.
-
-### pi-toolview
-
-- New package: compact one-line tool output for pi's seven built-in tools, expandable on demand, with `/toolview compact|full` globally or per tool.
-
-
-### Monorepo
+## Monorepo (2026-08-15)
 
 - **npm scope moved from `@pi-extensions` to `@smarzban`**. The old `@pi-extensions/pi-pacman` and
   `@pi-extensions/pi-statusline` packages are frozen at their last published versions; new releases
   ship only as `@smarzban/pi-*`. Reinstall with `pi install npm:@smarzban/pi-<name>`.
 - Release workflow publishes any package from a per-package tag (`pi-<name>-vX.Y.Z`); each package
   versions and releases independently. Replaces the single `v*` tag that only published pi-pacman.
+
+## pi-editor 0.1.0 (2026-08-15)
+
+Initial release.
+
+- Rounded input editor box (moved out of pi-statusline), with an optional session-name label on the
+  top or bottom border (`/editor name on|off|top|bottom`)
+- `alt+s` draft stash, kept per project in `~/.pi/agent/stash.json`; `/stash` shows status,
+  `/stash clear` clears
+- Settings persist to `~/.pi/agent/editor.json`
+
+## pi-statusline 0.2.0 (2026-08-15)
+
+- **Breaking**: the rounded editor box moved to the new pi-editor package. `/statusline off` now
+  restores the default footer only, and installing pi-statusline alone no longer draws the box.
+- Add `[N t/s]` (decode-only output rate of the last measurable response) and `[ttft …]` (wait
+  before the reply started) footer segments, both on by default, toggled with
+  `/statusline tps on|off` and `/statusline ttft on|off`.
+- Add an optional session name segment to the footer, toggled with `/statusline session on|off`.
+- Make the open-PR segment a clickable OSC 8 hyperlink in terminals that support links.
+
+## pi-toolview 0.1.0 (2026-08-15)
+
+Initial release.
+
+- Compact one-line tool output for pi's seven built-in tools, expandable on demand
+- `/toolview compact|full` globally or per tool
+
+## pi-statusline 0.1.3 (2026-07-22)
+
+- Clear merged or closed pull requests from the footer promptly.
+- Add gallery image metadata and bundle demo images.
+
+## pi-pacman 0.1.2 (2026-07-22)
+
+- Preserve externally edited config files.
+- Add gallery image metadata and bundle demo images.
 
 ## pi-statusline 0.1.2 (2026-07-18)
 
