@@ -4,7 +4,7 @@ Compact tool output display for [pi](https://github.com/earendil-works/pi).
 
 Replaces pi's verbose built-in tool rendering with one-line summaries, expandable on demand (ctrl+o). Execution is fully delegated to the originals, so the LLM still sees complete output.
 
-## Before / after
+## after
 
 **Default pi** shows full tool output inline — every line of bash, every file read, full diffs, etc.
 
