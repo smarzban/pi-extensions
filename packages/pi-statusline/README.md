@@ -12,6 +12,7 @@ Part of the [pi-extensions](https://github.com/smarzban/pi-extensions) monorepo.
 - **Model · effort** from the active model + thinking level
 - **Context** as `ctx N% · used/total`: green below 50%, yellow at 50%+, red at 70%+
 - **Session cost** `$x.xxx` from assistant `usage.cost.total` when non-zero
+- **Tokens/sec** `N t/s` and **time-to-first-token** `ttft …`: speed of the last assistant response, both toggleable (see [Speed segments](#speed-segments))
 - **Provider remaining** for **openai-codex**, **opt-in, off by default** (see [Provider usage](#provider-usage))
 - **Git** `⎇ branch +staged *unstaged ?untracked` plus ahead/behind; **open PR** via `gh`, clickable in terminals that support links
 - **Local by default** with no network calls or token reads unless you enable provider usage
@@ -53,11 +54,37 @@ The current branch's open PR is checked on startup, branch changes, `/statusline
 /statusline usage off     # disable provider quota (default)
 /statusline session on    # show the [⚑ name] segment (default)
 /statusline session off   # hide the session name segment
+/statusline tps on|off    # show/hide the tokens-per-second segment (default on)
+/statusline ttft on|off   # show/hide the time-to-first-token segment (default on)
 /statusline refresh       # re-fetch git (+ provider usage if enabled) now
 ```
 
 All settings persist to `~/.pi/agent/statusline.json` (`enabled`,
-`usageEnabled`, `sessionName`).
+`usageEnabled`, `sessionName`, `tps`, `ttft`).
+
+## Speed segments
+
+Two numbers describe how fast the last reply was, and they answer different
+questions:
+
+- **`ttft` (time to first token)** is the wait before the reply started
+  appearing. Think of it as the model "reading your message and thinking"
+  before it begins to type. Long ttft = long silent pause. For local models
+  this grows with how much conversation the model has to re-read; for cloud
+  models it also includes queueing on the provider's side.
+- **`t/s` (tokens per second)** is the typing speed once the reply started:
+  how many word-pieces (tokens) arrive each second. Higher = the text streams
+  in faster. Measured from the first token to the last, so the thinking pause
+  above is *not* mixed into it.
+
+So `[42 t/s]  [ttft 2.1s]` reads as: it thought for about 2 seconds, then
+typed at 42 tokens a second. Both are measured the way local tools like
+Ollama and LM Studio report speed (t/s is the decode-only rate, ttft kept
+separate, never blended), so the numbers are comparable to theirs. Reasoning
+models stream their thinking too, so their ttft stays short while thinking
+time shows up inside the t/s window.
+
+Hide either with `/statusline tps off` or `/statusline ttft off`.
 
 ## Provider usage
 
