@@ -6,21 +6,14 @@ Each package is versioned and released independently under `packages/<name>`, vi
 
 ## Unreleased
 
-### All packages
-
-- **npm scope moved from `@pi-extensions` to `@smarzban`**. The old `@pi-extensions/pi-pacman` and `@pi-extensions/pi-statusline` packages are frozen at their last published versions; new releases ship only as `@smarzban/pi-*`. Reinstall with `pi install npm:@smarzban/pi-<name>`.
-
 ### pi-editor
 
 - New package: the rounded input editor box (moved out of pi-statusline) plus an `alt+s` draft stash, kept per project in `~/.pi/agent/stash.json`.
 
-### pi-statusline (speed segments)
-
-- Add `[N t/s]` (decode-only output rate of the last measurable response) and `[ttft …]` (wait before the reply started) footer segments, both on by default, toggled with `/statusline tps on|off` and `/statusline ttft on|off`.
-
 ### pi-statusline
 
 - **Breaking**: the rounded editor box moved to the new pi-editor package. `/statusline off` now restores the default footer only, and installing pi-statusline alone no longer draws the box. Release this as a minor bump.
+- Add `[N t/s]` (decode-only output rate of the last measurable response) and `[ttft …]` (wait before the reply started) footer segments, both on by default, toggled with `/statusline tps on|off` and `/statusline ttft on|off`.
 - Add an optional session name segment to the footer, toggled with `/statusline session on|off`.
 
 ### pi-toolview
@@ -30,6 +23,9 @@ Each package is versioned and released independently under `packages/<name>`, vi
 
 ### Monorepo
 
+- **npm scope moved from `@pi-extensions` to `@smarzban`**. The old `@pi-extensions/pi-pacman` and
+  `@pi-extensions/pi-statusline` packages are frozen at their last published versions; new releases
+  ship only as `@smarzban/pi-*`. Reinstall with `pi install npm:@smarzban/pi-<name>`.
 - Release workflow publishes any package from a per-package tag (`pi-<name>-vX.Y.Z`); each package
   versions and releases independently. Replaces the single `v*` tag that only published pi-pacman.
 
