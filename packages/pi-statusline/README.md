@@ -80,9 +80,15 @@ questions:
 So `[42 t/s]  [ttft 2.1s]` reads as: it thought for about 2 seconds, then
 typed at 42 tokens a second. Both are measured the way local tools like
 Ollama and LM Studio report speed (t/s is the decode-only rate, ttft kept
-separate, never blended), so the numbers are comparable to theirs. Reasoning
-models stream their thinking too, so their ttft stays short while thinking
-time shows up inside the t/s window.
+separate, never blended), so the numbers are comparable to theirs.
+
+Fine print: ttft always reflects the latest response, while t/s reflects the
+latest *measurable* one (responses under half a second or with no counted
+output keep the previous reading), so after a very short reply the two can
+describe different responses. And reasoning models count their thinking as
+output tokens whether or not the thinking is streamed, so providers that hide
+reasoning can show an inflated t/s: tokens generated during the silent wait
+are credited to the typing window.
 
 Hide either with `/statusline tps off` or `/statusline ttft off`.
 
