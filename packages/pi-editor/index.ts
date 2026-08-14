@@ -10,8 +10,8 @@
  * setEditorText / shortcuts):
  *
  *   1. Rounded editor box — drawn border around the input editor.
- *   2. Draft stash — ctrl+s saves the current draft (per project) and clears
- *      the editor; ctrl+s with an empty editor restores it (one-shot).
+ *   2. Draft stash — alt+s saves the current draft (per project) and clears
+ *      the editor; alt+s with an empty editor restores it (one-shot).
  *
  * Commands:
  *   /editor [on|off|status]   Toggle the rounded box
@@ -265,9 +265,10 @@ export default function (pi: ExtensionAPI) {
 		);
 	};
 
-	// ── ctrl+s stash ─────────────────────────────────────────────────
+	// ── alt+s stash ──────────────────────────────────────────────────
+	// alt+s: unbound by any pi built-in, so no shortcut-conflict warning.
 
-	pi.registerShortcut("ctrl+s", {
+	pi.registerShortcut("alt+s", {
 		description: "Stash or restore the current draft (per project)",
 		handler: (ctx) => {
 			const text = ctx.ui.getEditorText();

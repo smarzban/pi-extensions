@@ -73,6 +73,10 @@ interface PersistedState {
 	usageEnabled?: boolean;
 	/** Session name segment [⚑ name] (default true). */
 	sessionName?: boolean;
+	/** Tokens/sec segment (default true). */
+	tps?: boolean;
+	/** Time-to-first-token segment (default true). */
+	ttft?: boolean;
 }
 
 function statePath(): string {
@@ -413,9 +417,21 @@ export default function (pi: ExtensionAPI) {
 	// Provider quota is opt-in: nothing is read or fetched until the user turns it on.
 	let usageEnabled = saved.usageEnabled === true;
 	let sessionNameEnabled = saved.sessionName !== false;
+	let tpsEnabled = saved.tps !== false;
+	let ttftEnabled = saved.ttft !== false;
 	let thinkingLevel = "off";
 	let sessionName: string | undefined;
 	let git: GitState | null = null;
+	/** Wall-clock start of the assistant message currently streaming. */
+	let msgStartAt: number | null = null;
+	/** Wall clock of the first streamed update (≈ first token) of that message. */
+	let firstTokenAt: number | null = null;
+	/** Wall clock of the current turn's start (≈ when the provider request went out). */
+	let turnStartAt: number | null = null;
+	/** Output tokens/sec of the last finished assistant message. */
+	let lastTps: number | null = null;
+	/** Time-to-first-token (ms) of the last assistant message. */
+	let lastTtftMs: number | null = null;
 	let pr: PullRequest | null = null;
 	/** Branch that `pr` was resolved for. */
 	let prBranch: string | null = null;
@@ -429,7 +445,14 @@ export default function (pi: ExtensionAPI) {
 	let tuiRef: { requestRender: () => void } | null = null;
 	const usageCache = new Map<string, UsageSnapshot>();
 
-	const persist = () => saveState({ enabled, usageEnabled, sessionName: sessionNameEnabled });
+	const persist = () =>
+		saveState({
+			enabled,
+			usageEnabled,
+			sessionName: sessionNameEnabled,
+			tps: tpsEnabled,
+			ttft: ttftEnabled,
+		});
 
 	const stopTimer = () => {
 		if (refreshTimer) {
@@ -586,6 +609,27 @@ export default function (pi: ExtensionAPI) {
 				? bracket(theme, dim(`$${totalCost.toFixed(3)}`))
 				: "";
 
+		// output tokens/sec of the last assistant response (average over the whole
+		// message, so time-to-first-token is included)
+		const tpsSeg =
+			tpsEnabled && lastTps != null
+				? bracket(theme, dim(`${lastTps >= 10 ? Math.round(lastTps) : lastTps.toFixed(1)} t/s`))
+				: "";
+
+		// time-to-first-token of the last assistant response (wait before the
+		// reply started appearing)
+		const ttftSeg =
+			ttftEnabled && lastTtftMs != null
+				? bracket(
+						theme,
+						dim(
+							lastTtftMs < 1000
+								? `ttft ${Math.round(lastTtftMs)}ms`
+								: `ttft ${(lastTtftMs / 1000).toFixed(1)}s`,
+						),
+					)
+				: "";
+
 		// provider usage: Codex only (when windows available)
 		const usageSegs: string[] = [];
 		if (latestUsage?.windows.length) {
@@ -638,7 +682,7 @@ export default function (pi: ExtensionAPI) {
 				: "";
 
 		const sep = "  ";
-		const parts = [nameSeg, modelSeg, ctxSeg, costSeg, ...usageSegs, gitSeg, prSeg].filter(Boolean);
+		const parts = [nameSeg, modelSeg, ctxSeg, costSeg, tpsSeg, ttftSeg, ...usageSegs, gitSeg, prSeg].filter(Boolean);
 		const lines: string[] = [];
 		let current = "";
 		for (const p of parts) {
@@ -735,6 +779,51 @@ export default function (pi: ExtensionAPI) {
 		if (enabled && ctx.hasUI && !tuiRef) applyAll(ctx);
 	});
 
+	// tokens/sec: decode-only rate, matching how Ollama / LM Studio / llama.cpp
+	// report it. The clock starts at the first streamed update (≈ first token),
+	// so prompt-processing time (TTFT) is excluded; output tokens are divided by
+	// the streaming wall clock. Falls back to message_start if no update fires.
+	//
+	// TTFT is anchored to turn_start (≈ when the provider request went out), not
+	// message_start: pi only creates the assistant message once the stream begins,
+	// so message_start → first update is ~0ms and useless as a wait measure.
+	pi.on("turn_start", async () => {
+		turnStartAt = Date.now();
+	});
+
+	pi.on("message_start", async (event) => {
+		if (event.message.role !== "assistant") return;
+		msgStartAt = Date.now();
+		firstTokenAt = null;
+	});
+
+	pi.on("message_update", async (event) => {
+		if (event.message.role !== "assistant") return;
+		if (firstTokenAt == null) {
+			firstTokenAt = Date.now();
+			if (turnStartAt != null) {
+				lastTtftMs = firstTokenAt - turnStartAt;
+				turnStartAt = null; // one TTFT per turn
+				tuiRef?.requestRender();
+			}
+		}
+	});
+
+	pi.on("message_end", async (event) => {
+		if (event.message.role !== "assistant") return;
+		const startedAt = firstTokenAt ?? msgStartAt;
+		msgStartAt = null;
+		firstTokenAt = null;
+		if (startedAt == null) return;
+		const elapsedMs = Date.now() - startedAt;
+		const output = Number((event.message as any).usage?.output) || 0;
+		// Sub-second blips and zero-token messages produce junk rates; skip them
+		// and keep the previous reading.
+		if (output <= 0 || elapsedMs < 500) return;
+		lastTps = output / (elapsedMs / 1000);
+		tuiRef?.requestRender();
+	});
+
 	pi.on("turn_end", async (_event, ctx) => {
 		refreshGit(ctx.cwd);
 		refreshPr(ctx.cwd);
@@ -743,7 +832,8 @@ export default function (pi: ExtensionAPI) {
 	// ── command ──────────────────────────────────────────────────────
 
 	pi.registerCommand("statusline", {
-		description: "Statusline footer: on | off | usage on|off | session on|off | refresh",
+		description:
+			"Statusline footer: on | off | usage on|off | session on|off | tps on|off | ttft on|off | refresh",
 		handler: async (args, ctx) => {
 			const cmd = args.trim().toLowerCase();
 			if (!cmd || cmd === "status") {
@@ -826,6 +916,41 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify("Statusline refreshed", "info");
 				return;
 			}
+			// Speed segments: [N t/s] and [ttft …]
+			if (cmd === "tps" || cmd.startsWith("tps ")) {
+				const arg = cmd.slice("tps".length).trim();
+				if (arg === "" || arg === "status") {
+					ctx.ui.notify(`Tokens/sec segment: ${tpsEnabled ? "on" : "off"}. Toggle: /statusline tps on|off`, "info");
+					return;
+				}
+				if (arg === "on" || arg === "enable") tpsEnabled = true;
+				else if (arg === "off" || arg === "disable") tpsEnabled = false;
+				else {
+					ctx.ui.notify("Usage: /statusline tps [on|off]", "error");
+					return;
+				}
+				persist();
+				tuiRef?.requestRender();
+				ctx.ui.notify(`Tokens/sec segment: ${tpsEnabled ? "on" : "off"}`, "info");
+				return;
+			}
+			if (cmd === "ttft" || cmd.startsWith("ttft ")) {
+				const arg = cmd.slice("ttft".length).trim();
+				if (arg === "" || arg === "status") {
+					ctx.ui.notify(`Time-to-first-token segment: ${ttftEnabled ? "on" : "off"}. Toggle: /statusline ttft on|off`, "info");
+					return;
+				}
+				if (arg === "on" || arg === "enable") ttftEnabled = true;
+				else if (arg === "off" || arg === "disable") ttftEnabled = false;
+				else {
+					ctx.ui.notify("Usage: /statusline ttft [on|off]", "error");
+					return;
+				}
+				persist();
+				tuiRef?.requestRender();
+				ctx.ui.notify(`Time-to-first-token segment: ${ttftEnabled ? "on" : "off"}`, "info");
+				return;
+			}
 			// Session name segment: [⚑ name]
 			if (cmd === "session") {
 				ctx.ui.notify(`Session name segment: ${sessionNameEnabled ? "on" : "off"}. Toggle: /statusline session on|off`, "info");
@@ -846,7 +971,7 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify(`Session name segment: ${sessionNameEnabled ? "on" : "off"}`, "info");
 				return;
 			}
-			ctx.ui.notify("Usage: /statusline [on|off|usage on|off|session on|off|refresh]", "error");
+			ctx.ui.notify("Usage: /statusline [on|off|usage on|off|session on|off|tps on|off|ttft on|off|refresh]", "error");
 		},
 	});
 }

@@ -33,13 +33,13 @@ Settings persist to `~/.pi/agent/editor.json` (`enabled`, `sessionName`,
 
 ## Draft stash
 
-`ctrl+s` parks a half-written prompt so you can go do something else; `ctrl+s`
-again brings it back. Same muscle memory as Claude Code's draft stash.
+`alt+s` parks a half-written prompt so you can go do something else; `alt+s`
+again brings it back. Same idea as Claude Code's draft stash.
 
 | Action | Effect |
 |--------|--------|
-| `ctrl+s` with text in the editor | Stash it (per project) and clear the editor |
-| `ctrl+s` with an empty editor | Restore the stash into the editor (one-shot, the stash is then cleared) |
+| `alt+s` with text in the editor | Stash it (per project) and clear the editor |
+| `alt+s` with an empty editor | Restore the stash into the editor (one-shot, the stash is then cleared) |
 | `/stash` | Show stash status for this project |
 | `/stash clear` | Clear this project's stash |
 
@@ -67,14 +67,12 @@ touched.
 pi install npm:@pi-extensions/pi-editor
 ```
 
-## Shortcut conflict note
+## Shortcut note
 
-pi binds `ctrl+s` to `app.session.toggleSort` (session tree) and
-`app.models.save` (models selector) by default. Neither is reserved for
-extensions and neither fires while the input editor is focused, so the
-extension's `ctrl+s` wins in the editor. A benign "conflict" warning shows in
-the extensions list; remap those two built-ins in your keybindings config if
-you want it gone.
+On macOS, your terminal must send Option as Meta/Esc+ for `alt+s` to work
+(the default in iTerm2 profiles set to "Esc+", Ghostty via
+`macos-option-as-alt`, and kitty via `macos_option_as_alt`), otherwise
+Option+S types ß instead.
 
 ## Development
 
@@ -84,4 +82,4 @@ pi install /absolute/path/to/pi-extensions/packages/pi-editor
 ```
 
 One extension, no build step: `index.ts` registers the custom editor
-component, the `ctrl+s` shortcut, and the `/editor` + `/stash` commands.
+component, the `alt+s` shortcut, and the `/editor` + `/stash` commands.

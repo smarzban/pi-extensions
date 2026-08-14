@@ -8,7 +8,11 @@ Each package is versioned and released independently under `packages/<name>`, vi
 
 ### pi-editor
 
-- New package: the rounded input editor box (moved out of pi-statusline) plus a `ctrl+s` draft stash, kept per project in `~/.pi/agent/stash.json`.
+- New package: the rounded input editor box (moved out of pi-statusline) plus an `alt+s` draft stash, kept per project in `~/.pi/agent/stash.json`.
+
+### pi-statusline (speed segments)
+
+- Add `[N t/s]` (decode-only output rate of the last measurable response) and `[ttft …]` (wait before the reply started) footer segments, both on by default, toggled with `/statusline tps on|off` and `/statusline ttft on|off`.
 
 ### pi-statusline
 
