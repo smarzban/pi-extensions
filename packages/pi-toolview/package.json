@@ -9,7 +9,9 @@
     "pi-extension",
     "toolview",
     "compact",
-    "tool-output"
+    "tool-output",
+    "collapse",
+    "coding-agent"
   ],
   "pi": {
     "extensions": [

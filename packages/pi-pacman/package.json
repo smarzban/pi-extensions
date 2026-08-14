@@ -8,6 +8,8 @@
 		"pi-extension",
 		"pacman",
 		"working-indicator",
+		"spinner",
+		"loading",
 		"coding-agent"
 	],
 	"author": "Saeed Marzban",
