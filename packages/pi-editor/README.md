@@ -69,12 +69,10 @@ pi install npm:@pi-extensions/pi-editor
 
 ## Shortcut note
 
-The stash uses `alt+s` because pi already binds `ctrl+s` to two built-ins
-(`app.session.toggleSort` and `app.models.save`), and claiming it triggers a
-shortcut-conflict warning in the extensions list. `alt+s` is unbound by any
-built-in. On macOS, your terminal must send Option as Meta/Esc+ (the default
-in iTerm2 profiles set to "Esc+", Ghostty via `macos-option-as-alt`, and
-kitty via `macos_option_as_alt`) or Option+S types ß instead.
+On macOS, your terminal must send Option as Meta/Esc+ for `alt+s` to work
+(the default in iTerm2 profiles set to "Esc+", Ghostty via
+`macos-option-as-alt`, and kitty via `macos_option_as_alt`), otherwise
+Option+S types ß instead.
 
 ## Development
 

@@ -266,9 +266,7 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	// ── alt+s stash ──────────────────────────────────────────────────
-	// alt+s rather than ctrl+s: pi binds ctrl+s to app.models.save and
-	// app.session.toggleSort by default, and claiming it triggers a shortcut
-	// conflict warning in the extensions list. alt+s is unbound by any built-in.
+	// alt+s: unbound by any pi built-in, so no shortcut-conflict warning.
 
 	pi.registerShortcut("alt+s", {
 		description: "Stash or restore the current draft (per project)",

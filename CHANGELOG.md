@@ -9,7 +9,6 @@ Each package is versioned and released independently under `packages/<name>`, vi
 ### pi-editor
 
 - New package: the rounded input editor box (moved out of pi-statusline) plus an `alt+s` draft stash, kept per project in `~/.pi/agent/stash.json`.
-- **Breaking**: the draft stash moved from `ctrl+s` to `alt+s`; `ctrl+s` collided with pi's built-in `app.models.save` / `app.session.toggleSort` bindings and fired a shortcut-conflict warning on every install.
 
 ### pi-statusline (speed segments)
 
