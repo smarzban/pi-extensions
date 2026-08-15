@@ -18,7 +18,7 @@ Each package under `packages/` is independent: its own `package.json`, entrypoin
 | [pi-pacman](packages/pi-pacman) | [`@smarzban/pi-pacman`](https://www.npmjs.com/package/@smarzban/pi-pacman) | Pac-Man working / thinking indicator |
 | [pi-statusline](packages/pi-statusline) | [`@smarzban/pi-statusline`](https://www.npmjs.com/package/@smarzban/pi-statusline) | Footer statusline: model/effort, context, cost, provider usage, git branch/diff and PR |
 | [pi-toolview](packages/pi-toolview) | [`@smarzban/pi-toolview`](https://www.npmjs.com/package/@smarzban/pi-toolview) | Compact tool output: one-line summaries (expandable) instead of raw output |
-| [pi-editor](packages/pi-editor) | [`@smarzban/pi-editor`](https://www.npmjs.com/package/@smarzban/pi-editor) | Rounded input editor box + draft stash (alt+s, per project) |
+| [pi-editor](packages/pi-editor) | [`@smarzban/pi-editor`](https://www.npmjs.com/package/@smarzban/pi-editor) | Rounded input editor box + draft copy (alt+c) + stash (alt+s, per project) |
 
 Package docs, install, and commands live in each package’s README (e.g. [packages/pi-pacman/README.md](packages/pi-pacman/README.md)).
 

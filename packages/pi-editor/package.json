@@ -1,7 +1,7 @@
 {
 	"name": "@smarzban/pi-editor",
-	"version": "0.1.0",
-	"description": "Rounded input editor box + draft stash (alt+s saves/restores the editor draft per project)",
+	"version": "0.2.0",
+	"description": "Rounded input editor box with exact draft copy (alt+c) and per-project stash (alt+s)",
 	"type": "module",
 	"keywords": [
 		"pi-package",

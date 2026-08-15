@@ -22,6 +22,7 @@
  */
 
 import {
+	copyToClipboard,
 	CustomEditor,
 	type ExtensionAPI,
 	type ExtensionContext,
@@ -265,8 +266,26 @@ export default function (pi: ExtensionAPI) {
 		);
 	};
 
-	// ── alt+s stash ──────────────────────────────────────────────────
-	// alt+s: unbound by any pi built-in, so no shortcut-conflict warning.
+	// ── editor shortcuts ─────────────────────────────────────────────
+	// alt+c / alt+s: unbound by pi built-ins, so no shortcut-conflict warning.
+
+	pi.registerShortcut("alt+c", {
+		description: "Copy the full editor draft without visual borders or wrapping",
+		handler: async (ctx) => {
+			const text = ctx.ui.getEditorText();
+			if (!text) {
+				ctx.ui.notify("Editor is empty", "info");
+				return;
+			}
+
+			try {
+				await copyToClipboard(text);
+				ctx.ui.notify(`Copied ${text.length} chars from editor`, "info");
+			} catch {
+				ctx.ui.notify("Could not copy the editor draft", "error");
+			}
+		},
+	});
 
 	pi.registerShortcut("alt+s", {
 		description: "Stash or restore the current draft (per project)",
