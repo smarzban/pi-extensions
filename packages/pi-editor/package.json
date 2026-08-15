@@ -1,7 +1,7 @@
 {
 	"name": "@smarzban/pi-editor",
-	"version": "0.1.0",
-	"description": "Rounded input editor box + draft stash (alt+s saves/restores the editor draft per project)",
+	"version": "0.2.0",
+	"description": "Rounded input editor box with exact draft copy (alt+c) and per-project stash (alt+s)",
 	"type": "module",
 	"keywords": [
 		"pi-package",
@@ -37,6 +37,7 @@
 	},
 	"files": [
 		"index.ts",
+		"copy-draft.mjs",
 		"README.md",
 		"LICENSE"
 	],
@@ -44,6 +45,7 @@
 		"access": "public"
 	},
 	"scripts": {
+		"test": "node --test tests/*.test.mjs",
 		"prepublishOnly": "node -e \"require('fs').accessSync('index.ts')\""
 	}
 }

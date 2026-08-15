@@ -5,12 +5,13 @@
  *   │ › text box              │
  *   ╰─────────────────────────╯
  *
- * Two editor-surface features in one package (pi exposes the input editor as
+ * Three editor-surface features in one package (pi exposes the input editor as
  * one extension surface: the editor component itself plus getEditorText /
  * setEditorText / shortcuts):
  *
  *   1. Rounded editor box — drawn border around the input editor.
- *   2. Draft stash — alt+s saves the current draft (per project) and clears
+ *   2. Draft copy — alt+c copies the logical draft without visual borders.
+ *   3. Draft stash — alt+s saves the current draft (per project) and clears
  *      the editor; alt+s with an empty editor restores it (one-shot).
  *
  * Commands:
@@ -22,6 +23,7 @@
  */
 
 import {
+	copyToClipboard,
 	CustomEditor,
 	type ExtensionAPI,
 	type ExtensionContext,
@@ -30,6 +32,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { registerCopyDraftShortcut } from "./copy-draft.mjs";
 import {
 	existsSync,
 	mkdirSync,
@@ -265,8 +268,10 @@ export default function (pi: ExtensionAPI) {
 		);
 	};
 
-	// ── alt+s stash ──────────────────────────────────────────────────
-	// alt+s: unbound by any pi built-in, so no shortcut-conflict warning.
+	// ── editor shortcuts ─────────────────────────────────────────────
+	// alt+c / alt+s: unbound by pi built-ins, so no shortcut-conflict warning.
+
+	registerCopyDraftShortcut(pi, copyToClipboard);
 
 	pi.registerShortcut("alt+s", {
 		description: "Stash or restore the current draft (per project)",

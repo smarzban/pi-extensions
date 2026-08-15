@@ -12,6 +12,11 @@ Each package is versioned and released independently under `packages/<name>`, vi
 - Release workflow publishes any package from a per-package tag (`pi-<name>-vX.Y.Z`); each package
   versions and releases independently. Replaces the single `v*` tag that only published pi-pacman.
 
+## pi-editor 0.2.0 (2026-08-15)
+
+- Add `alt+c` to copy the full logical editor draft without visual borders or wrapping.
+- Report successful copies, empty drafts, and clipboard failures in the TUI.
+
 ## pi-editor 0.1.0 (2026-08-15)
 
 Initial release.
