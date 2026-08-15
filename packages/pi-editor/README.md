@@ -93,4 +93,9 @@ pi install /absolute/path/to/pi-extensions/packages/pi-editor
 
 One extension, no build step: `index.ts` registers the custom editor
 component, the `alt+c` copy shortcut, the `alt+s` stash shortcut, and the
-`/editor` + `/stash` commands.
+`/editor` + `/stash` commands. The copy shortcut behavior is isolated in
+`copy-draft.mjs` for dependency-free tests.
+
+```bash
+npm test
+```
