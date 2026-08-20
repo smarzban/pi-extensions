@@ -23,6 +23,17 @@ Each package under `packages/` is independent: its own `package.json`, entrypoin
 
 Package docs, install, and commands live in each package’s README (e.g. [packages/pi-pacman/README.md](packages/pi-pacman/README.md)).
 
+## Themes
+
+The monorepo also includes two Pi themes:
+
+| Theme | Description |
+|-------|-------------|
+| [Moonlight](themes/moonlight.json) | Dark theme with purple, teal, and blue accents |
+| [Midnight](themes/midnight.json) | Dark theme with cyan, blue, and green accents |
+
+Install the monorepo from git, then select a theme through Pi’s `/settings`.
+
 ## Quickstart
 
 Install a package into pi (example: pi-pacman):
