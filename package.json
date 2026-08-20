@@ -14,6 +14,9 @@
 			"./packages/pi-statusline",
 			"./packages/pi-toolview",
 			"./packages/pi-editor"
+		],
+		"themes": [
+			"./themes"
 		]
 	},
 	"devDependencies": {
