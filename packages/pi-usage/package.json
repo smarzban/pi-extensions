@@ -11,7 +11,7 @@
   "engines": {"node": ">=20.0.0"},
   "pi": {"extensions":["./index.ts"]},
   "peerDependencies": {"@earendil-works/pi-coding-agent":"*", "@earendil-works/pi-tui":"*"},
-  "files": ["index.ts", "core.mjs", "README.md", "LICENSE"],
+  "files": ["index.ts", "core.mjs", "graph.mjs", "README.md", "LICENSE"],
   "publishConfig": {"access":"public"},
   "scripts": {"test":"node --test", "prepublishOnly":"node --test"}
 }

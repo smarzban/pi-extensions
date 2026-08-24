@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { open, readdir, readFile, rename, stat, mkdir, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 
 const TOKEN_KEYS = ["input", "output", "cacheRead", "cacheWrite", "reasoning", "total"];
 const CODEX_KEYS = ["input_tokens", "output_tokens", "cached_input_tokens", "cache_write_input_tokens", "reasoning_output_tokens", "total_tokens"];
@@ -12,6 +12,11 @@ const validTimestamp = value => {
  return Number.isFinite(timestamp) ? timestamp : undefined;
 };
 const hash = value => createHash("sha256").update(value).digest("hex");
+export const freshTokens = usage => n(usage.input) + n(usage.output) + n(usage.cacheWrite);
+export const filterEvents = (events, query = "") => {
+ const needle = query.trim().toLocaleLowerCase();
+ return needle ? events.filter(event => [event.source,event.provider,event.model].some(value => String(value).toLocaleLowerCase().includes(needle))) : events;
+};
 // Pi fork/clone records are byte-for-byte copied into another session file, so their
 // serialized-entry hash deliberately spans the entire Pi lineage rather than one session.
 const identity = (source, sessionId, key) => source === "pi" || source === "claude" ? `${source}:${key}` : `${source}:${sessionId}:${key}`;
@@ -29,6 +34,7 @@ function makeEvent(base, usage = {}) {
  return event;
 }
 
+const disjointInput = (input, cacheRead, cacheWrite) => Math.max(0,n(input)-n(cacheRead)-n(cacheWrite));
 const piUsage = usage => usage && ({ input:usage.input, output:usage.output, cacheRead:usage.cacheRead, cacheWrite:usage.cacheWrite, cacheWrite5m:Math.max(0,n(usage.cacheWrite)-n(usage.cacheWrite1h)), cacheWrite1h:usage.cacheWrite1h, reasoning:usage.reasoning, total:usage.totalTokens, costUsd:usage.cost?.total });
 const claudeUsage = usage => ({ input:usage.input_tokens, output:usage.output_tokens, cacheRead:usage.cache_read_input_tokens, cacheWrite:usage.cache_creation_input_tokens, cacheWrite5m:usage.cache_creation?.ephemeral_5m_input_tokens, cacheWrite1h:usage.cache_creation?.ephemeral_1h_input_tokens, total:n(usage.input_tokens) + n(usage.output_tokens) + n(usage.cache_read_input_tokens) + n(usage.cache_creation_input_tokens) });
 const codexDelta = (current, previous) => Object.fromEntries(CODEX_KEYS.map(key => [key, Math.max(0, n(current[key]) - n(previous?.[key]))]));
@@ -46,9 +52,52 @@ function piEvents(file, health) {
   else continue;
   if (!usage) continue;
   const event = makeEvent({source:"pi",sessionId,key:hash(line),timestamp,provider,model,kind,costBasis:"recorded",origin:file.path}, usage);
-  if (event) result.push(event); else health.skipped++;
+  if (event) {
+   // Keep only accounting-safe child references, never the tool payload that contained them.
+   const messageDetails = row.message?.details;
+   const details = row.details;
+   const results = Array.isArray(messageDetails?.results) ? messageDetails.results : Array.isArray(details?.results) ? details.results : [];
+   const sessionFiles = results.map(item => typeof item?.sessionFile === "string" ? item.sessionFile : undefined).filter(Boolean);
+   const runId = typeof details?.runId === "string" ? details.runId : typeof messageDetails?.runId === "string" ? messageDetails.runId : undefined;
+   // This is the complete persisted link allowlist. Results themselves can carry prompts,
+   // tool output, and other transcript data, so retain only their count and file links.
+   if (results.length || runId) event.childLinks = { sessionFiles, runId, resultCount:results.length };
+   result.push(event);
+  } else health.skipped++;
  }
  return result;
+}
+
+function piSuppressedIdentities(candidates, files) {
+ const linked = candidates.filter(event => event.kind === "nested-tool" && event.childLinks);
+ const suppressed = new Set();
+ if (!linked.length) return suppressed;
+ const paths = new Set(files.map(file => resolve(file.path)));
+ const runDirectories = new Map();
+ for (const event of linked) if (event.childLinks.resultCount > event.childLinks.sessionFiles.length && event.childLinks.runId) runDirectories.set(`${resolve(dirname(event.origin),event.childLinks.runId)}${sep}`,0);
+ for (const path of paths) for (const directory of runDirectories.keys()) if (path.startsWith(directory) && path.endsWith(".jsonl")) runDirectories.set(directory,runDirectories.get(directory)+1);
+ for (const event of linked) {
+  const { sessionFiles = [], runId, resultCount = 0 } = event.childLinks;
+  // No result references means this is an ordinary tool aggregate, regardless of runId.
+  if (!resultCount) continue;
+  // Explicit file references must always resolve from this copy's parent directory.
+  if (!sessionFiles.every(link => paths.has(resolve(dirname(event.origin), link)))) continue;
+  const unresolved = resultCount - sessionFiles.length;
+  if (!unresolved) { suppressed.add(identity(event.source,event.sessionId,event.key)); continue; }
+  // Results without a file reference may belong to a run directory next to this session.
+  // Count only scanned JSONL files beneath that directory, never session ids or raw rows.
+  if (!runId) continue;
+  const runDirectory = `${resolve(dirname(event.origin), runId)}${sep}`;
+  const scannedChildren = runDirectories.get(runDirectory) ?? 0;
+  const explicitInRun = sessionFiles.filter(link => resolve(dirname(event.origin), link).startsWith(runDirectory)).length;
+  if (scannedChildren - explicitInRun >= unresolved) suppressed.add(identity(event.source,event.sessionId,event.key));
+ }
+ return suppressed;
+}
+
+function piReconciledEvents(candidates, files) {
+ const suppressed = piSuppressedIdentities(candidates, files);
+ return candidates.filter(event => !suppressed.has(identity(event.source,event.sessionId,event.key)));
 }
 
 function claudeCandidates(file, health) {
@@ -80,7 +129,7 @@ function grokEvents(file, health) {
   const sessionId = row.params?.sessionId || directorySessionId;
   for (const [model, modelUsage] of models) {
    const usage = modelUsage && typeof modelUsage === "object" ? modelUsage : aggregate;
-   const event = makeEvent({source:"grok",sessionId,key:`${promptId}:${model}`,timestamp:row.timestamp,provider:"xai",model,kind:"main",costBasis:"recorded",origin:file.path},{input:usage.inputTokens,output:usage.outputTokens,cacheRead:usage.cachedReadTokens,cacheWrite:usage.cacheCreationTokens,reasoning:usage.reasoningTokens,total:usage.totalTokens,costNativeTicks:usage.costUsdTicks ?? (models.length === 1 ? aggregate.costUsdTicks : undefined)});
+   const event = makeEvent({source:"grok",sessionId,key:`${promptId}:${model}`,timestamp:row.timestamp,provider:"xai",model,kind:"main",costBasis:"recorded",origin:file.path},{input:disjointInput(usage.inputTokens,usage.cachedReadTokens,usage.cacheCreationTokens),output:usage.outputTokens,cacheRead:usage.cachedReadTokens,cacheWrite:usage.cacheCreationTokens,reasoning:usage.reasoningTokens,total:usage.totalTokens,costNativeTicks:usage.costUsdTicks ?? (models.length === 1 ? aggregate.costUsdTicks : undefined)});
    if (event) result.push(event); else health.skipped++;
   }
  }
@@ -118,7 +167,7 @@ function codexEvents(file, health, state, parserState = {}) {
   const grew = CODEX_KEYS.some(key => n(current[key]) > n(previous[key]));
   if (!grew || !hasTokens(delta)) continue;
   state[sessionId] = { usage:Object.fromEntries(CODEX_KEYS.map(key => [key, Math.max(n(previous[key]), n(current[key]))])), model, provider };
-  const event = makeEvent({source:"codex",sessionId,key:`${sessionId}:${n(current.total_tokens)}:${hash(JSON.stringify(delta)).slice(0,12)}`,timestamp:row.timestamp,provider,model,kind,costBasis:"unavailable",origin:file.path},{input:delta.input_tokens,output:delta.output_tokens,cacheRead:delta.cached_input_tokens,cacheWrite:delta.cache_write_input_tokens,reasoning:delta.reasoning_output_tokens,total:delta.total_tokens});
+  const event = makeEvent({source:"codex",sessionId,key:`${sessionId}:${n(current.total_tokens)}:${hash(JSON.stringify(delta)).slice(0,12)}`,timestamp:row.timestamp,provider,model,kind,costBasis:"unavailable",origin:file.path},{input:disjointInput(delta.input_tokens,delta.cached_input_tokens,delta.cache_write_input_tokens),output:delta.output_tokens,cacheRead:delta.cached_input_tokens,cacheWrite:delta.cache_write_input_tokens,reasoning:delta.reasoning_output_tokens,total:delta.total_tokens});
   if (event) result.push(event); else health.skipped++;
  }
  parserState.sessionId = sessionId;
@@ -140,7 +189,7 @@ export function collectLines(source, files) {
   if (source === "codex") candidates.push(...codexEvents(file, health, codexState));
  }
  const map = new Map();
- for (const event of candidates) {
+ for (const event of source === "pi" ? piReconciledEvents(candidates, files) : candidates) {
   const id = identity(event.source, event.sessionId, event.key);
   const old = map.get(id);
   // Claude streams snapshots: preserve the largest/latest usage, never first-wins.
@@ -180,8 +229,8 @@ async function appendedLines(path, offset, size) {
 }
 
 const specs = roots => [["pi",roots.pi,path=>path.endsWith(".jsonl")],["claude",roots.claude,path=>path.endsWith(".jsonl")],["codex",roots.codex,path=>path.endsWith(".jsonl")],["grok",roots.grok,path=>basename(path)==="updates.jsonl"]];
-const emptyIndex = () => ({version:3,events:[],files:{},codex:{}});
-export async function loadIndex(path) { try { const index=JSON.parse(await readFile(path,"utf8")); return index?.version === 3 ? index : emptyIndex(); } catch { return emptyIndex(); } }
+const emptyIndex = () => ({version:6,events:[],files:{},codex:{}});
+export async function loadIndex(path) { try { const index=JSON.parse(await readFile(path,"utf8")); return index?.version === 6 ? index : emptyIndex(); } catch { return emptyIndex(); } }
 export async function saveIndex(path,index) { await mkdir(dirname(path),{recursive:true}); const temporary=`${path}.${process.pid}.${Date.now()}.tmp`; await writeFile(temporary,JSON.stringify(index),"utf8"); await rename(temporary,path); }
 
 export async function importAll(roots, index = emptyIndex()) {
@@ -195,6 +244,9 @@ export async function importAll(roots, index = emptyIndex()) {
   for (const path of paths) { try { const info=await stat(path); const cursor=next.files[path]; if (cursor && (info.size < cursor.size || info.mtimeMs < cursor.mtimeMs || info.size === cursor.size && info.mtimeMs !== cursor.mtimeMs || cursor.ino !== undefined && info.ino !== cursor.ino)) reconcile=true; } catch { reconcile=true; } }
   if (reconcile) { next.events=next.events.filter(event=>event.source !== source); for (const [path] of known) delete next.files[path]; if (source === "codex") next.codex={}; }
   const sourceHealth={source,status:"ok",files:paths.length,malformed:0,skipped:0,reconciled:reconcile}; const candidates=[];
+  // Reconciliation resolves links against every currently scanned Pi path, including
+  // unchanged files during a warm append. File paths are safe index metadata.
+  const piFiles = source === "pi" ? paths.map(path => ({path,lines:[]})) : [];
   for (const path of paths) {
    const info=await stat(path); const cursor=next.files[path]; if (!reconcile && cursor?.size === info.size && cursor.mtimeMs === info.mtimeMs) continue;
    const {lines,offset}=await appendedLines(path,reconcile ? 0 : cursor?.offset || 0,info.size); const file={path,lines};
@@ -206,8 +258,12 @@ export async function importAll(roots, index = emptyIndex()) {
    next.files[path]={source,size:info.size,mtimeMs:info.mtimeMs,ino:info.ino,offset};
    if (source === "codex") next.files[path].parserState=parserState;
   }
-  const map=new Map(next.events.map(event=>[identity(event.source,event.sessionId,event.key),event]));
-  for (const event of candidates) { const id=identity(event.source,event.sessionId,event.key), old=map.get(id); if (!old || source !== "claude" || event.total > old.total || event.total === old.total && event.timestamp >= old.timestamp) map.set(id,event); }
+  const hasChildLinks = source === "pi" && (candidates.some(event => event.childLinks) || next.events.some(event => event.source === "pi" && event.childLinks));
+  const allCandidates = hasChildLinks ? [...next.events.filter(event => event.source === "pi"),...candidates] : candidates;
+  const suppressed = hasChildLinks ? piSuppressedIdentities(allCandidates,piFiles) : new Set();
+  const sourceCandidates = source === "pi" ? candidates.filter(event => !suppressed.has(identity(event.source,event.sessionId,event.key))) : candidates;
+  const map=new Map(next.events.filter(event => !suppressed.has(identity(event.source,event.sessionId,event.key))).map(event=>[identity(event.source,event.sessionId,event.key),event]));
+  for (const event of sourceCandidates) { const id=identity(event.source,event.sessionId,event.key), old=map.get(id); if (!old || source !== "claude" || event.total > old.total || event.total === old.total && event.timestamp >= old.timestamp) map.set(id,event); }
   next.events=[...map.values()]; sourceHealth.status=sourceHealth.malformed || sourceHealth.skipped ? "partial" : "ok"; health.push(sourceHealth);
  }
  return {events:next.events,health,index:next};
@@ -224,7 +280,7 @@ export function eventsForPeriod(events,period="all",now=new Date(),timeZone=Intl
  else if (period !== "all") { const [year,month,date]=today.split("-").map(Number); const start=new Date(Date.UTC(year,month-1,date)); start.setUTCDate(start.getUTCDate()-(period==="today"?0:period==="7d"?6:29)); startDay=start.toISOString().slice(0,10); }
  return events.filter(event=>period==="all" || day(new Date(event.timestamp))>=startDay && day(new Date(event.timestamp))<=today);
 }
-export function totalsForPeriod(events,period="all",now=new Date(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone) { return eventsForPeriod(events,period,now,timeZone).reduce((total,event)=>{total.requests++; for(const key of TOKEN_KEYS) total[key]+=event[key]; total.cacheWrite5m+=event.cacheWrite5m || 0; total.cacheWrite1h+=event.cacheWrite1h || 0; const cost=(event.costUsd || 0)+(event.costNativeTicks || 0)/1e10; if(event.costBasis === "recorded") { total.recordedCost+=cost; total.recordedCostItems++; } else if(event.costBasis === "estimated") { total.estimatedCost+=cost; total.estimatedCostItems++; } else total.unavailableCost++; return total;},{requests:0,input:0,output:0,cacheRead:0,cacheWrite:0,cacheWrite5m:0,cacheWrite1h:0,reasoning:0,total:0,recordedCost:0,recordedCostItems:0,estimatedCost:0,estimatedCostItems:0,unavailableCost:0}); }
+export function totalsForPeriod(events,period="all",now=new Date(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone) { return eventsForPeriod(events,period,now,timeZone).reduce((total,event)=>{total.requests++; for(const key of TOKEN_KEYS) total[key]+=event[key]; total.fresh+=freshTokens(event); total.cacheWrite5m+=event.cacheWrite5m || 0; total.cacheWrite1h+=event.cacheWrite1h || 0; const cost=(event.costUsd || 0)+(event.costNativeTicks || 0)/1e10; if(event.costBasis === "recorded") { total.recordedCost+=cost; total.recordedCostItems++; } else if(event.costBasis === "estimated") { total.estimatedCost+=cost; total.estimatedCostItems++; } else total.unavailableCost++; return total;},{requests:0,input:0,output:0,cacheRead:0,cacheWrite:0,fresh:0,cacheWrite5m:0,cacheWrite1h:0,reasoning:0,total:0,recordedCost:0,recordedCostItems:0,estimatedCost:0,estimatedCostItems:0,unavailableCost:0}); }
 export function estimateModelCost(usages,model) {
  const base=model?.cost;
  if (!base) return undefined;

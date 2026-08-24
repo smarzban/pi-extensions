@@ -9,7 +9,9 @@ import {
 	loadIndex,
 	saveIndex,
 	totalsForPeriod,
+	filterEvents,
 } from "./core.mjs";
+import { bucketEvents, renderBrailleGraph } from "./graph.mjs";
 
 type Period = "today" | "7d" | "30d" | "month" | "all";
 type Group = "source" | "provider" | "model";
@@ -71,6 +73,10 @@ class UsageDashboard {
 	private usageOffset = 0;
 	private rowLabels: string[] = [];
 	private viewSize = 15;
+	private view: "table" | "graph" = "table";
+	private graphMetric: "fresh" | "cacheRead" = "fresh";
+	private query = "";
+	private typingFilter = false;
 	private readonly number = new Intl.NumberFormat();
 	private readonly rate = new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 });
 
@@ -223,11 +229,15 @@ class UsageDashboard {
 	}
 
 	handleInput(data: string) {
-		if (matchesKey(data, Key.ctrl("c")) || data === "q") {
+		if (matchesKey(data, Key.ctrl("c"))) {
 			this.done();
 			return;
 		}
 		if (this.screen !== "usage") {
+			if (data === "q") {
+				this.done();
+				return;
+			}
 			if (
 				matchesKey(data, Key.escape) ||
 				matchesKey(data, Key.left) ||
@@ -250,8 +260,31 @@ class UsageDashboard {
 			}
 			return;
 		}
+		if (this.typingFilter) {
+			if (matchesKey(data, Key.escape)) { this.query = ""; this.typingFilter = false; }
+			else if (matchesKey(data, Key.enter)) this.typingFilter = false;
+			else if (matchesKey(data, Key.backspace)) this.query = this.query.slice(0, -1);
+			else {
+				const printable = data.replace(/\x1b\[\d+~/gu, "").replace(/[\x00-\x1f\x7f]/gu, "");
+				if (printable) this.query += printable;
+			}
+			this.resetCursor();
+			return;
+		}
 		if (matchesKey(data, Key.escape)) {
+			if (this.query) { this.query = ""; this.resetCursor(); }
+			else this.done();
+		} else if (data === "q") {
 			this.done();
+		} else if (data === "/") {
+			this.typingFilter = true;
+		} else if (data === "v") {
+			this.view = this.view === "table" ? "graph" : "table";
+			this.resetCursor();
+		} else if (this.view === "graph" && data === "f") {
+			this.graphMetric = "fresh";
+		} else if (this.view === "graph" && data === "c") {
+			this.graphMetric = "cacheRead";
 		} else if (data === "e") {
 			this.usageCursor = this.cursor;
 			this.usageOffset = this.offset;
@@ -280,17 +313,17 @@ class UsageDashboard {
 			this.sourcePickerActive = true;
 			this.group = "source";
 			this.resetCursor();
-		} else if (matchesKey(data, Key.enter)) {
+		} else if (this.view === "table" && matchesKey(data, Key.enter)) {
 			this.drillDown();
 		} else if (matchesKey(data, Key.left) || matchesKey(data, Key.backspace)) {
 			this.goBack();
-		} else if (matchesKey(data, Key.up) || data === "k") {
+		} else if (this.view === "table" && (matchesKey(data, Key.up) || data === "k")) {
 			this.cursor = Math.max(0, this.cursor - 1);
-		} else if (matchesKey(data, Key.down) || data === "j") {
+		} else if (this.view === "table" && (matchesKey(data, Key.down) || data === "j")) {
 			this.cursor = Math.min(Math.max(0, this.rowLabels.length - 1), this.cursor + 1);
-		} else if (matchesKey(data, Key.pageUp)) {
+		} else if (this.view === "table" && matchesKey(data, Key.pageUp)) {
 			this.cursor = Math.max(0, this.cursor - this.viewSize);
-		} else if (matchesKey(data, Key.pageDown)) {
+		} else if (this.view === "table" && matchesKey(data, Key.pageDown)) {
 			this.cursor = Math.min(
 				Math.max(0, this.rowLabels.length - 1),
 				this.cursor + this.viewSize,
@@ -301,11 +334,11 @@ class UsageDashboard {
 	render(width: number) {
 		if (this.screen !== "usage") return this.renderEstimatePicker(width);
 		const periodEvents = eventsForPeriod(this.events, this.period);
-		const selected = periodEvents.filter(
+		const selected = filterEvents(periodEvents.filter(
 			(event) =>
 				(!this.filters.source || event.source === this.filters.source) &&
 				(!this.filters.provider || event.provider === this.filters.provider),
-		);
+		), this.query);
 		const totals = totalsForPeriod(selected, "all");
 		const paygEstimate = this.estimateTarget
 			? estimateModelCost(selected, this.estimateTarget)
@@ -333,6 +366,7 @@ class UsageDashboard {
 		const visibleRows = rows.slice(this.offset, this.offset + this.viewSize);
 		const breadcrumb = [this.filters.source, this.filters.provider].filter(Boolean).join(" / ");
 		const location = breadcrumb ? `${breadcrumb} · ${this.group}` : `grouped by ${this.group}`;
+		const filterLabel = this.query ? ` filter: ${this.query}` : "";
 
 		const rangeLine =
 			rows.length > this.viewSize
@@ -344,11 +378,12 @@ class UsageDashboard {
 		const stat = (label: string, value: string) =>
 			`${this.theme.fg("dim", label)} ${this.theme.fg("accent", this.theme.bold(value))}`;
 		const wideContent = [
-			this.theme.fg("accent", this.theme.bold(` Usage · ${this.period} · ${location}`)),
+			this.theme.fg("accent", this.theme.bold(` Usage · ${this.period} · ${location}${filterLabel}`)),
+			...(this.typingFilter ? [this.theme.fg("accent", ` Filter source/provider/model: ${this.query}▌ (Enter apply, Esc clear)`)] : this.query ? [this.theme.fg("accent", ` Filter active: ${this.query} (/ edit, Esc clear)`)] : []),
 			"",
-			this.theme.fg("dim", " ↑↓ select   Enter drill down   e estimate   Esc close"),
+			this.theme.fg("dim", " ↑↓ select   Enter drill down   / filter   v graph   e estimate   Esc close"),
 			"",
-			` ${stat("TOTAL", formatTokens(totals.total))}     ${stat("REQUESTS", this.number.format(totals.requests))}     ${stat("API EQ", costLabel(totals))}     ${stat("CACHE READ", formatTokens(totals.cacheRead))}`,
+			` ${stat("FRESH", formatTokens(totals.fresh))}     ${stat("CACHE READ", formatTokens(totals.cacheRead))}     ${stat("TOTAL", formatTokens(totals.total))}     ${stat("REQUESTS", this.number.format(totals.requests))}     ${stat("API EQ", costLabel(totals))}`,
 			...(this.estimateTarget && paygLabel
 				? [
 						"",
@@ -358,12 +393,12 @@ class UsageDashboard {
 			"",
 			this.theme.fg(
 				"dim",
-				"  Name                       Requests  Input  Output  Cache R  Cache W  Reasoning  Cost",
+				"  Name                       Requests  Fresh  Input  Output  Cache R  Cache W  Reasoning  Cost",
 			),
 			...visibleRows.map(({ label, totals: rowTotals }, visibleIndex) => {
 				const rowIndex = this.offset + visibleIndex;
 				const marker = rowIndex === this.cursor ? "›" : " ";
-				const line = `${marker} ${label.padEnd(26).slice(0, 26)} ${this.number.format(rowTotals.requests).padStart(8)} ${formatTokens(rowTotals.input).padStart(6)} ${formatTokens(rowTotals.output).padStart(7)} ${formatTokens(rowTotals.cacheRead).padStart(8)} ${formatTokens(rowTotals.cacheWrite).padStart(8)} ${formatTokens(rowTotals.reasoning).padStart(10)}  ${costLabel(rowTotals)}`;
+				const line = `${marker} ${label.padEnd(26).slice(0, 26)} ${this.number.format(rowTotals.requests).padStart(8)} ${formatTokens(rowTotals.fresh).padStart(6)} ${formatTokens(rowTotals.input).padStart(6)} ${formatTokens(rowTotals.output).padStart(7)} ${formatTokens(rowTotals.cacheRead).padStart(8)} ${formatTokens(rowTotals.cacheWrite).padStart(8)} ${formatTokens(rowTotals.reasoning).padStart(10)}  ${costLabel(rowTotals)}`;
 				return rowIndex === this.cursor ? this.theme.fg("accent", line) : line;
 			}),
 			...(rangeLine ? [rangeLine] : []),
@@ -375,8 +410,9 @@ class UsageDashboard {
 		];
 		const activeRow = rows[this.cursor];
 		const compactContent = [
-			this.theme.fg("accent", this.theme.bold(` Usage · ${this.period} · ${location}`)),
-			` ${formatTokens(totals.total)} total · ${this.number.format(totals.requests)} requests`,
+			this.theme.fg("accent", this.theme.bold(` Usage · ${this.period} · ${location}${filterLabel}`)),
+			...(this.typingFilter ? [this.theme.fg("accent", ` Filter source/provider/model: ${this.query}▌ (Enter apply, Esc clear)`)] : this.query ? [this.theme.fg("accent", ` Filter active: ${this.query} (/ edit, Esc clear)`)] : []),
+			` ${formatTokens(totals.fresh)} fresh · ${formatTokens(totals.cacheRead)} cache read · ${this.number.format(totals.requests)} requests`,
 			...(this.estimateTarget && paygLabel
 				? [
 						"",
@@ -387,7 +423,7 @@ class UsageDashboard {
 			...visibleRows.map(({ label, totals: rowTotals }, visibleIndex) => {
 				const rowIndex = this.offset + visibleIndex;
 				const marker = rowIndex === this.cursor ? "›" : " ";
-				const line = `${marker} ${label.padEnd(24).slice(0, 24)} ${this.number.format(rowTotals.requests).padStart(7)} req  ${formatTokens(rowTotals.total).padStart(7)}`;
+				const line = `${marker} ${label.padEnd(24).slice(0, 24)} ${this.number.format(rowTotals.requests).padStart(7)} req  ${formatTokens(rowTotals.fresh).padStart(7)} fresh`;
 				return rowIndex === this.cursor ? this.theme.fg("accent", line) : line;
 			}),
 			...(rangeLine ? [rangeLine] : []),
@@ -403,9 +439,24 @@ class UsageDashboard {
 			"",
 			this.theme.fg(
 				"dim",
-				" ↑↓ select · Enter drill · ← back · o sources · e estimate · Esc close",
+				" ↑↓ select · Enter drill · / filter · v graph · ← back · o sources · e estimate · Esc close",
 			),
 		];
+		if (this.view === "graph") {
+			const graphWidth = Math.max(12, width - 6);
+			const graph = bucketEvents(selected, this.period);
+			const graphContent = [
+				this.theme.fg("accent", this.theme.bold(` Usage graph · ${this.period} · ${location}${filterLabel}`)),
+				...(this.typingFilter ? [this.theme.fg("accent", ` Filter source/provider/model: ${this.query}▌ (Enter apply, Esc clear)`)] : []),
+				` ${formatTokens(totals.fresh)} Fresh · ${formatTokens(totals.cacheRead)} Cache Read · ${this.number.format(totals.requests)} requests`,
+				"",
+				this.theme.fg("accent", ` ${this.graphMetric === "fresh" ? "[f] Fresh" : " f Fresh"} · ${this.graphMetric === "cacheRead" ? "[c] Cache Read" : " c Cache Read"}`),
+				...renderBrailleGraph(graph, this.graphMetric, graphWidth),
+				"",
+				this.theme.fg("dim", " f Fresh · c Cache Read · v table · / filter · t today · 7 7d · 3 30d · m month · a all time · o sources · e estimate · Esc close"),
+			];
+			return this.frame(graphContent, width);
+		}
 		const content = width < 100 ? compactContent : wideContent;
 		return this.frame(content, width);
 	}

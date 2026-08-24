@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collectLines, estimateModelCost, importAll, loadIndex, saveIndex, totalsForPeriod } from "./core.mjs";
+import { collectLines, estimateModelCost, filterEvents, importAll, loadIndex, saveIndex, totalsForPeriod } from "./core.mjs";
+import { bucketEvents, compressBuckets, renderBrailleGraph } from "./graph.mjs";
 
 const iso = "2026-08-15T12:00:00.000Z";
 const piUsage = { input:10, output:4, cacheRead:2, cacheWrite:1, reasoning:3, totalTokens:14, cost:{total:.02} };
@@ -17,6 +18,82 @@ test("Pi counts assistant, tool, compaction and branch summary once even when a 
  const fork=[line({type:"session",id:"fork",parentSession:"/parent.jsonl"}),...parent.slice(1),line({type:"message",id:"e",timestamp:iso,message:{role:"assistant",provider:"openai",model:"gpt",usage:piUsage}})];
  const events=collectLines("pi",[{path:"/fork.jsonl",lines:fork},{path:"/parent.jsonl",lines:parent}]);
  assert.equal(events.length,5); assert.equal(events.reduce((sum,event)=>sum+event.input,0),50); assert.ok(events.every(event=>event.reasoning <= event.output));
+});
+
+test("Pi reconciles nested aggregates only when every linked child is scanned, including fork-relative copies", () => {
+ const usage={input:100,output:20,cacheRead:50,cacheWrite:10,totalTokens:180};
+ const child=line({type:"message",timestamp:iso,message:{role:"assistant",usage:piUsage}});
+ const aggregate=line({type:"message",timestamp:iso,message:{role:"toolResult",usage,details:{results:[{sessionFile:"children/child.jsonl"}]}}});
+ const parent=[line({type:"session",id:"parent"}),aggregate];
+ const fork=[line({type:"session",id:"fork"}),aggregate];
+ const missing=collectLines("pi",[{path:"/sessions/parent.jsonl",lines:parent}]);
+ assert.equal(missing.length,1, "unavailable children retain the aggregate");
+ const resolved=collectLines("pi",[{path:"/copies/fork.jsonl",lines:fork},{path:"/sessions/parent.jsonl",lines:parent},{path:"/copies/children/child.jsonl",lines:[line({type:"session",id:"child"}),child]}]);
+ assert.equal(resolved.length,1, "a resolvable duplicate suppresses the shared aggregate identity");
+ assert.equal(resolved[0].kind,"main");
+});
+
+test("Pi nested reconciliation does not let an explicit child also cover an unresolved result", () => {
+ const aggregate=line({type:"message",timestamp:iso,message:{role:"toolResult",usage:piUsage},details:{runId:"children",results:[{sessionFile:"children/one.jsonl"},{}]}});
+ const parent={path:"/sessions/parent.jsonl",lines:[line({type:"session",id:"parent"}),aggregate]};
+ const child=id=>({path:`/sessions/children/${id}.jsonl`,lines:[line({type:"session",id}),line({type:"message",id,timestamp:iso,message:{role:"assistant",usage:piUsage}})]});
+ const incomplete=collectLines("pi",[parent,child("one")]); assert.equal(incomplete.some(event=>event.kind==="nested-tool"),true);
+ const complete=collectLines("pi",[parent,child("one"),child("two")]); assert.equal(complete.some(event=>event.kind==="nested-tool"),false); assert.equal(complete.length,2);
+});
+
+test("Pi nested reconciliation re-runs against unchanged children and fork-relative paths", async () => {
+ const root=await fixture(); try {
+  const pi=join(root,"pi"), parent=join(pi,"parent.jsonl"), child=join(pi,"runs","child","one.jsonl"), fork=join(pi,"copies","parent.jsonl"), forkChild=join(pi,"copies","runs","child","one.jsonl");
+  const aggregate=line({type:"message",timestamp:iso,message:{role:"toolResult",usage:piUsage},details:{runId:"runs/child",results:[{}]}});
+  await jsonl(parent,[line({type:"session",id:"parent"}),aggregate]);
+  let result=await importAll({pi}); assert.equal(result.events.length,1, "missing run child retains aggregate");
+  await jsonl(child,[line({type:"session",id:"child"}),line({type:"message",timestamp:iso,message:{role:"assistant",usage:piUsage}})]);
+  result=await importAll({pi},result.index); assert.equal(result.health[0].reconciled,false,"a new child remains incremental"); assert.equal(result.events.length,1); assert.equal(result.events[0].sessionId,"child");
+  await writeFile(parent,`\n${aggregate}\n`,{flag:"a"}); result=await importAll({pi},result.index); assert.equal(result.events.length,1, "a parent append resolves against an unchanged child");
+  await jsonl(fork,[line({type:"session",id:"fork"}),aggregate]);
+  await jsonl(forkChild,[line({type:"session",id:"fork-child"}),line({type:"message",timestamp:iso,message:{role:"assistant",usage:piUsage}})]);
+  result=await importAll({pi},result.index); assert.equal(result.events.every(event=>event.kind!=="nested-tool"),true, "a later fork copy can suppress an indexed parent");
+  await rm(child,{force:true}); await rm(forkChild,{force:true}); result=await importAll({pi},result.index); assert.equal(result.events.some(event=>event.kind==="nested-tool"),true, "child disappearance restores aggregate");
+ } finally { await rm(root,{recursive:true,force:true}); }
+});
+
+test("Pi retains runId-only aggregates without results and persists only child-link allowlist", () => {
+ const aggregate=line({type:"message",timestamp:iso,message:{role:"toolResult",usage:piUsage},details:{runId:"run",secret:"PRIVATE_SENTINEL"}});
+ const result=collectLines("pi",[{path:"/sessions/parent.jsonl",lines:[line({type:"session",id:"parent"}),aggregate]},{path:"/sessions/run/child.jsonl",lines:[line({type:"session",id:"child"})]}]);
+ assert.equal(result.length,1);
+ assert.equal(result[0].kind,"nested-tool");
+ assert.deepEqual(result[0].childLinks,{sessionFiles:[],runId:"run",resultCount:0});
+ assert.equal(JSON.stringify(result).includes("PRIVATE_SENTINEL"),false);
+});
+
+test("fresh totals exclude cache reads and filtering matches providers or models", () => {
+ const events=[
+  {source:"pi",provider:"Anthropic",model:"Claude A",timestamp:Date.now(),input:10,output:5,cacheWrite:2,cacheRead:90,total:107},
+  {source:"pi",provider:"OpenAI",model:"GPT Match",timestamp:Date.now(),input:3,output:4,cacheWrite:1,cacheRead:20,total:28},
+ ];
+ assert.equal(totalsForPeriod(events).fresh,25);
+ assert.deepEqual(filterEvents(events,"anthropic").map(event=>event.model),["Claude A"]);
+ assert.deepEqual(filterEvents(events,"match").map(event=>event.model),["GPT Match"]);
+ assert.deepEqual(filterEvents(events,"pi").map(event=>event.model),["Claude A","GPT Match"]);
+ assert.equal(filterEvents(events,"missing").length,0);
+});
+
+test("graph domains retain local zero gaps, compress totals, and render a bounded multiline braille line", () => {
+ const events=[
+  {timestamp:new Date(2026,7,15,1,10).getTime(),input:2,output:3,cacheWrite:1,cacheRead:8},
+  {timestamp:new Date(2026,7,13,23,50).getTime(),input:1,output:1,cacheWrite:0,cacheRead:1},
+ ];
+ const now=new Date(2026,7,15,12);
+ const today=bucketEvents(events,"today",now); assert.equal(today.length,13); assert.equal(today[0].label.endsWith("00:00"),true); assert.equal(today[1].fresh,6); assert.equal(today[2].fresh,0);
+ const week=bucketEvents(events,"7d",now); assert.equal(week.length,7); assert.equal(week[5].fresh,0);
+ assert.equal(bucketEvents(events,"30d",now).length,30); assert.equal(bucketEvents(events,"month",now).length,15); assert.equal(bucketEvents(events,"all",now).length,3);
+ const source=Array.from({length:100},(_,index)=>({label:String(index),fresh:index,cacheRead:index * 2}));
+ const compressed=compressBuckets(source,8); assert.equal(compressed.length,8); assert.equal(compressed.reduce((sum,bucket)=>sum+bucket.fresh,0),4950); assert.equal(compressed.reduce((sum,bucket)=>sum+bucket.cacheRead,0),9900);
+ const rendered=renderBrailleGraph(compressed,"fresh",24); assert.ok(rendered.length>=5); assert.ok(rendered.some(row=>/[\u2801-\u28ff]/.test(row))); assert.ok(rendered.every(row=>row.length<=24));
+ const zero=renderBrailleGraph([{label:"zero",fresh:0,cacheRead:0}],"fresh",10); assert.ok(zero.every(row=>row.length<=10)); assert.ok(zero.some(row=>row.includes("No Fresh")));
+ assert.ok(renderBrailleGraph([],"cacheRead",12).some(line=>line.includes("No data")));
+ const many=Array.from({length:150_000},(_,index)=>({timestamp:events[0].timestamp+index,input:1,output:0,cacheWrite:0,cacheRead:0})); assert.equal(bucketEvents(many,"all",now).reduce((sum,bucket)=>sum+bucket.fresh,0),150_000);
+ assert.equal(bucketEvents([{timestamp:1,input:1}],"all",now).length,5000,"corrupt ancient timestamps cannot create an unbounded domain");
 });
 
 test("Claude deduplicates mixed request/message identities with max/latest semantics and includes subagents", () => {
@@ -33,7 +110,7 @@ test("Codex maintains high-water deltas through stale updates, cache-only change
  const meta=(id,threadSource="user")=>line({type:"session_meta",payload:{id,session_id:"logical",thread_source:threadSource,model_provider:"openai"}});
  const copiedRootMeta=meta("root");
  const events=collectLines("codex",[{path:"/sessions/one.jsonl",lines:[meta("root"),line({type:"turn_context",payload:{model:"gpt-a"}}),token(10,7,3,2,1,1),token(10,7,3,2,1,1),token(12,7,3,4,1,1)]},{path:"/archived/two.jsonl",lines:[meta("child","subagent"),copiedRootMeta,line({type:"turn_context",payload:{model:"gpt-b"}}),token(10,7,3,2,1,1),token(18,12,6,5,2,2),token(16,10,6,5,2,2)]}]);
- assert.equal(events.reduce((sum,event)=>sum+event.total,0),30); assert.equal(events.reduce((sum,event)=>sum+event.cacheRead,0),9); assert.equal(events.at(-1).model,"gpt-b"); assert.equal(events.at(-1).kind,"subagent"); assert.ok(events.every(event=>event.reasoning <= event.output));
+ assert.equal(events.reduce((sum,event)=>sum+event.total,0),30); assert.equal(events.reduce((sum,event)=>sum+event.input,0),9); assert.equal(events.reduce((sum,event)=>sum+event.cacheRead,0),9); assert.equal(events.at(-1).model,"gpt-b"); assert.equal(events.at(-1).kind,"subagent"); assert.ok(events.every(event=>event.reasoning <= event.output));
 });
 
 test("Codex incremental imports retain rollout identity and model state across appends", async () => {
@@ -56,7 +133,7 @@ test("Codex incremental imports retain rollout identity and model state across a
 test("Grok reads nested update usage, splits modelUsage, deduplicates prompts and keeps integer ticks", () => {
  const turn=line({timestamp:1786816800,params:{sessionId:"s",update:{sessionUpdate:"turn_completed",prompt_id:"p",usage:{inputTokens:12,outputTokens:6,totalTokens:18,cachedReadTokens:2,cacheCreationTokens:1,reasoningTokens:4,costUsdTicks:600000000,modelUsage:{"grok-a":{inputTokens:10,outputTokens:5,cachedReadTokens:2,cacheCreationTokens:1,reasoningTokens:3,totalTokens:15,costUsdTicks:500000000},"grok-b":{inputTokens:2,outputTokens:1,cachedReadTokens:0,cacheCreationTokens:0,reasoningTokens:1,totalTokens:3,costUsdTicks:100000000}}}}}});
  const events=collectLines("grok",[{path:"/grok/s/updates.jsonl",lines:[turn,turn]}]);
- assert.equal(events.length,2); assert.equal(events.reduce((sum,event)=>sum+event.costNativeTicks,0),600000000); assert.deepEqual(events.map(event=>event.model).sort(),["grok-a","grok-b"]);
+ assert.equal(events.length,2); assert.equal(events.reduce((sum,event)=>sum+event.input,0),9); assert.equal(events.reduce((sum,event)=>sum+event.costNativeTicks,0),600000000); assert.deepEqual(events.map(event=>event.model).sort(),["grok-a","grok-b"]);
 });
 
 test("incremental import is idempotent, skips a torn tail, then imports its completed append without retaining prompt content", async () => {
