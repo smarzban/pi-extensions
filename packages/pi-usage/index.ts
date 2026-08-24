@@ -51,8 +51,10 @@ const costLabel = (totals: {
 class UsageDashboard {
 	private period: Period;
 	private group: Group = "source";
-	private page = 0;
-	private maxPage = 0;
+	private filters: { source?: string; provider?: string } = {};
+	private cursor = 0;
+	private offset = 0;
+	private rowLabels: string[] = [];
 	private readonly pageSize = 15;
 	private readonly number = new Intl.NumberFormat();
 
@@ -66,25 +68,74 @@ class UsageDashboard {
 		this.period = period;
 	}
 
+	private resetCursor() {
+		this.cursor = 0;
+		this.offset = 0;
+	}
+
+	private drillDown() {
+		const label = this.rowLabels[this.cursor];
+		if (!label) return;
+		if (this.group === "source") {
+			this.filters = { source: label };
+			this.group = "provider";
+		} else if (this.group === "provider") {
+			this.filters.provider = label;
+			this.group = "model";
+		} else {
+			return;
+		}
+		this.resetCursor();
+	}
+
+	private goBack() {
+		if (this.group === "model") {
+			delete this.filters.provider;
+			this.group = "provider";
+			this.resetCursor();
+		} else if (this.group === "provider" && this.filters.source) {
+			this.filters = {};
+			this.group = "source";
+			this.resetCursor();
+		}
+	}
+
 	handleInput(data: string) {
 		if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c")) || data === "q") {
 			this.done();
 		} else if (data === "t" || data === "7" || data === "3" || data === "a") {
 			this.period = data === "t" ? "today" : data === "7" ? "7d" : data === "3" ? "30d" : "all";
-			this.page = 0;
+			this.resetCursor();
 		} else if (data === "g") {
+			this.filters = {};
 			this.group =
 				this.group === "source" ? "provider" : this.group === "provider" ? "model" : "source";
-			this.page = 0;
+			this.resetCursor();
+		} else if (matchesKey(data, Key.enter)) {
+			this.drillDown();
+		} else if (matchesKey(data, Key.left) || matchesKey(data, Key.backspace)) {
+			this.goBack();
 		} else if (matchesKey(data, Key.up) || data === "k") {
-			this.page = Math.max(0, this.page - 1);
+			this.cursor = Math.max(0, this.cursor - 1);
 		} else if (matchesKey(data, Key.down) || data === "j") {
-			this.page = Math.min(this.maxPage, this.page + 1);
+			this.cursor = Math.min(Math.max(0, this.rowLabels.length - 1), this.cursor + 1);
+		} else if (matchesKey(data, Key.pageUp)) {
+			this.cursor = Math.max(0, this.cursor - this.pageSize);
+		} else if (matchesKey(data, Key.pageDown)) {
+			this.cursor = Math.min(
+				Math.max(0, this.rowLabels.length - 1),
+				this.cursor + this.pageSize,
+			);
 		}
 	}
 
 	render(width: number) {
-		const selected = eventsForPeriod(this.events, this.period);
+		const periodEvents = eventsForPeriod(this.events, this.period);
+		const selected = periodEvents.filter(
+			(event) =>
+				(!this.filters.source || event.source === this.filters.source) &&
+				(!this.filters.provider || event.provider === this.filters.provider),
+		);
 		const totals = totalsForPeriod(selected, "all");
 		const grouped = new Map<string, UsageEvent[]>();
 		for (const event of selected) {
@@ -96,25 +147,38 @@ class UsageDashboard {
 		const rows = [...grouped.entries()]
 			.map(([label, events]) => ({ label, totals: totalsForPeriod(events, "all") }))
 			.sort((left, right) => right.totals.total - left.totals.total);
-		this.maxPage = Math.max(0, Math.ceil(rows.length / this.pageSize) - 1);
-		this.page = Math.min(this.page, this.maxPage);
-		const firstRow = this.page * this.pageSize;
-		const visibleRows = rows.slice(firstRow, firstRow + this.pageSize);
+		this.rowLabels = rows.map((row) => row.label);
+		this.cursor = Math.min(this.cursor, Math.max(0, rows.length - 1));
+		if (this.cursor < this.offset) this.offset = this.cursor;
+		if (this.cursor >= this.offset + this.pageSize) {
+			this.offset = this.cursor - this.pageSize + 1;
+		}
+		const visibleRows = rows.slice(this.offset, this.offset + this.pageSize);
+		const breadcrumb = [this.filters.source, this.filters.provider].filter(Boolean).join(" / ");
+		const location = breadcrumb ? `${breadcrumb} · ${this.group}` : `grouped by ${this.group}`;
 
 		const lines = [
 			this.theme.fg(
 				"accent",
-				this.theme.bold(` Usage: ${this.period} · grouped by ${this.group}`),
+				this.theme.bold(` Usage: ${this.period} · ${location}`),
 			),
 			this.theme.fg(
 				"dim",
-				"Name                         Requests  Input  Output  Cache R  Cache W  Reasoning  Cost",
+				"  Name                       Requests  Input  Output  Cache R  Cache W  Reasoning  Cost",
 			),
-			...visibleRows.map(({ label, totals }) =>
-				`${label.padEnd(28).slice(0, 28)} ${this.number.format(totals.requests).padStart(8)} ${formatTokens(totals.input).padStart(6)} ${formatTokens(totals.output).padStart(7)} ${formatTokens(totals.cacheRead).padStart(8)} ${formatTokens(totals.cacheWrite).padStart(8)} ${formatTokens(totals.reasoning).padStart(10)}  ${costLabel(totals)}`,
-			),
+			...visibleRows.map(({ label, totals }, visibleIndex) => {
+				const rowIndex = this.offset + visibleIndex;
+				const marker = rowIndex === this.cursor ? "›" : " ";
+				const line = `${marker} ${label.padEnd(26).slice(0, 26)} ${this.number.format(totals.requests).padStart(8)} ${formatTokens(totals.input).padStart(6)} ${formatTokens(totals.output).padStart(7)} ${formatTokens(totals.cacheRead).padStart(8)} ${formatTokens(totals.cacheWrite).padStart(8)} ${formatTokens(totals.reasoning).padStart(10)}  ${costLabel(totals)}`;
+				return rowIndex === this.cursor ? this.theme.fg("accent", line) : line;
+			}),
 			...(rows.length > this.pageSize
-				? [this.theme.fg("dim", `Rows ${firstRow + 1}-${Math.min(firstRow + this.pageSize, rows.length)} of ${rows.length}`)]
+				? [
+						this.theme.fg(
+							"dim",
+							`Rows ${this.offset + 1}-${Math.min(this.offset + this.pageSize, rows.length)} of ${rows.length}`,
+						),
+					]
 				: []),
 			"",
 			`Total: ${formatTokens(totals.total)} normalized tokens, ${this.number.format(totals.requests)} requests, ${costLabel(totals)}`,
@@ -133,7 +197,7 @@ class UsageDashboard {
 			),
 			this.theme.fg(
 				"dim",
-				"t today · 7 7d · 3 30d · a all · g group · ↑↓ page · esc close",
+				"↑↓ select · enter drill down · ← back · g grouping · t/7/3/a period · esc close",
 			),
 		];
 		return lines.map((line) => truncateToWidth(line, width));
@@ -146,7 +210,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("usage", {
 		description: "Local usage dashboard. Args: today, 7d, 30d, all, rebuild",
 		handler: async (args, ctx) => {
-			const requested = args.trim().toLowerCase();
+			const requested = (args ?? "").trim().toLowerCase();
 			if (!["", "today", "7d", "30d", "all", "rebuild"].includes(requested)) {
 				ctx.ui.notify("Usage: /usage [today|7d|30d|all|rebuild]", "error");
 				return;
