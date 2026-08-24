@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collectLines, importAll, loadIndex, saveIndex, totalsForPeriod } from "./core.mjs";
+import { collectLines, estimateModelCost, importAll, loadIndex, saveIndex, totalsForPeriod } from "./core.mjs";
 
 const iso = "2026-08-15T12:00:00.000Z";
 const piUsage = { input:10, output:4, cacheRead:2, cacheWrite:1, reasoning:3, totalTokens:14, cost:{total:.02} };
@@ -71,6 +71,15 @@ test("incremental import is idempotent, skips a torn tail, then imports its comp
   await writeFile(file,"\n",{flag:"a"}); result=await importAll({pi},result.index); assert.equal(result.events.length,2); assert.equal(JSON.stringify(result.index).includes("PRIVATE_SENTINEL"),false);
   await saveIndex(indexPath,result.index); assert.deepEqual(await loadIndex(indexPath),result.index); assert.equal((await readFile(indexPath,"utf8")).includes("PRIVATE_SENTINEL"),false);
  } finally { await rm(root,{recursive:true,force:true}); }
+});
+
+test("PAYG estimates apply model tiers and long-cache pricing", () => {
+ const totals={input:1_000_000,output:500_000,cacheRead:2_000_000,cacheWrite:1_000_000,cacheWrite1h:250_000};
+ const model={cost:{input:2,output:10,cacheRead:.2,cacheWrite:2.5,tiers:[{inputTokensAbove:3_000_000,input:3,output:12,cacheRead:.3,cacheWrite:3.75}]}};
+ assert.equal(estimateModelCost([totals],model),13.9125);
+ assert.equal(estimateModelCost([{input:2_000_000},{input:2_000_000}],model),8);
+ assert.equal(estimateModelCost([{cacheWrite:1_000_000,cacheWrite1h:2_000_000}],{cost:{input:2,output:10,cacheRead:.2,cacheWrite:2.5}}),4);
+ assert.equal(estimateModelCost([{input:4_000_000}],{cost:{input:2,output:10,cacheRead:.2,cacheWrite:2.5,tiers:[{inputTokensAbove:3_000_000,input:3}]}}),undefined);
 });
 
 test("truncation and deleted files reconcile the index, malformed timestamps are skipped, and periods use local dates", async () => {

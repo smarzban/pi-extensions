@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
+	estimateModelCost,
 	eventsForPeriod,
 	importAll,
 	loadIndex,
@@ -18,6 +19,21 @@ interface UsageEvent {
 	provider: string;
 	model: string;
 	[key: string]: unknown;
+}
+
+interface PriceRates {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	tiers?: Array<PriceRates & { inputTokensAbove: number }>;
+}
+
+interface PricingModel {
+	provider: string;
+	id: string;
+	name: string;
+	cost: PriceRates;
 }
 
 const formatTokens = (value: number) => {
@@ -45,14 +61,22 @@ class UsageDashboard {
 	private group: Group = "provider";
 	private filters: { source?: string; provider?: string } = { source: "pi" };
 	private sourcePickerActive = false;
+	private screen: "usage" | "estimate-provider" | "estimate-model" = "usage";
+	private estimateProvider?: string;
+	private estimateTarget?: PricingModel;
+	private pickerItems: Array<{ label: string; value: string | PricingModel }> = [];
 	private cursor = 0;
 	private offset = 0;
+	private usageCursor = 0;
+	private usageOffset = 0;
 	private rowLabels: string[] = [];
 	private viewSize = 15;
 	private readonly number = new Intl.NumberFormat();
+	private readonly rate = new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 });
 
 	constructor(
 		private readonly events: UsageEvent[],
+		private readonly pricingModels: PricingModel[],
 		period: Period,
 		private readonly done: () => void,
 		private readonly theme: any,
@@ -63,6 +87,108 @@ class UsageDashboard {
 	private resetCursor() {
 		this.cursor = 0;
 		this.offset = 0;
+	}
+
+	private frame(content: string[], width: number) {
+		const innerWidth = Math.max(38, width - 2);
+		const framedRow = (line: string) => {
+			const clipped = truncateToWidth(line, innerWidth);
+			return `${this.theme.fg("border", "│")}${clipped}${" ".repeat(Math.max(0, innerWidth - visibleWidth(clipped)))}${this.theme.fg("border", "│")}`;
+		};
+		return [
+			this.theme.fg("border", `╭${"─".repeat(innerWidth)}╮`),
+			...content.map(framedRow),
+			this.theme.fg("border", `╰${"─".repeat(innerWidth)}╯`),
+		];
+	}
+
+	private restoreUsagePosition() {
+		this.screen = "usage";
+		this.cursor = this.usageCursor;
+		this.offset = this.usageOffset;
+	}
+
+	private chooseEstimateItem() {
+		const item = this.pickerItems[this.cursor];
+		if (!item) return;
+		if (this.screen === "estimate-provider" && typeof item.value === "string") {
+			this.estimateProvider = item.value;
+			this.screen = "estimate-model";
+			this.resetCursor();
+		} else if (this.screen === "estimate-model" && typeof item.value !== "string") {
+			this.estimateTarget = item.value;
+			this.restoreUsagePosition();
+		}
+	}
+
+	private leaveEstimatePicker() {
+		if (this.screen === "estimate-model") {
+			this.screen = "estimate-provider";
+			this.resetCursor();
+		} else {
+			this.restoreUsagePosition();
+		}
+	}
+
+	private renderEstimatePicker(width: number) {
+		this.viewSize = width < 100 ? 12 : 18;
+		if (this.screen === "estimate-provider") {
+			const counts = new Map<string, number>();
+			for (const model of this.pricingModels) {
+				counts.set(model.provider, (counts.get(model.provider) ?? 0) + 1);
+			}
+			this.pickerItems = [...counts]
+				.sort(([left], [right]) => left.localeCompare(right))
+				.map(([provider]) => ({ label: provider, value: provider }));
+		} else {
+			this.pickerItems = this.pricingModels
+				.filter((model) => model.provider === this.estimateProvider)
+				.sort((left, right) => left.name.localeCompare(right.name))
+				.map((model) => ({ label: model.name || model.id, value: model }));
+		}
+		this.rowLabels = this.pickerItems.map((item) => item.label);
+		this.cursor = Math.min(this.cursor, Math.max(0, this.pickerItems.length - 1));
+		if (this.cursor < this.offset) this.offset = this.cursor;
+		if (this.cursor >= this.offset + this.viewSize) {
+			this.offset = this.cursor - this.viewSize + 1;
+		}
+		const visible = this.pickerItems.slice(this.offset, this.offset + this.viewSize);
+		const title =
+			this.screen === "estimate-provider"
+				? " Estimate PAYG · choose provider"
+				: ` Estimate PAYG · ${this.estimateProvider} · choose model`;
+		const rows = visible.map((item, visibleIndex) => {
+			const rowIndex = this.offset + visibleIndex;
+			const marker = rowIndex === this.cursor ? "›" : " ";
+			let detail = "";
+			if (typeof item.value === "string") {
+				const count = this.pricingModels.filter((model) => model.provider === item.value).length;
+				detail = `${count} priced models`;
+			} else {
+				detail = `in $${this.rate.format(item.value.cost.input)}/M · out $${this.rate.format(item.value.cost.output)}/M`;
+			}
+			const line = `${marker} ${item.label.padEnd(width < 100 ? 28 : 48).slice(0, width < 100 ? 28 : 48)} ${detail}`;
+			return rowIndex === this.cursor ? this.theme.fg("accent", line) : line;
+		});
+		const range =
+			this.pickerItems.length > this.viewSize
+				? ` Rows ${this.offset + 1}-${Math.min(this.offset + this.viewSize, this.pickerItems.length)} of ${this.pickerItems.length}`
+				: "";
+		return this.frame(
+			[
+				this.theme.fg("accent", this.theme.bold(title)),
+				this.theme.fg(
+					"dim",
+					" Current Pi model catalog, credentials are not required for estimates",
+				),
+				"",
+				...rows,
+				...(range ? [this.theme.fg("dim", range)] : []),
+				"",
+				this.theme.fg("dim", " ↑↓ select · Enter choose · ← back · Esc back · q close"),
+			],
+			width,
+		);
 	}
 
 	private drillDown() {
@@ -97,8 +223,40 @@ class UsageDashboard {
 	}
 
 	handleInput(data: string) {
-		if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c")) || data === "q") {
+		if (matchesKey(data, Key.ctrl("c")) || data === "q") {
 			this.done();
+			return;
+		}
+		if (this.screen !== "usage") {
+			if (
+				matchesKey(data, Key.escape) ||
+				matchesKey(data, Key.left) ||
+				matchesKey(data, Key.backspace)
+			) {
+				this.leaveEstimatePicker();
+			} else if (matchesKey(data, Key.enter)) {
+				this.chooseEstimateItem();
+			} else if (matchesKey(data, Key.up) || data === "k") {
+				this.cursor = Math.max(0, this.cursor - 1);
+			} else if (matchesKey(data, Key.down) || data === "j") {
+				this.cursor = Math.min(Math.max(0, this.rowLabels.length - 1), this.cursor + 1);
+			} else if (matchesKey(data, Key.pageUp)) {
+				this.cursor = Math.max(0, this.cursor - this.viewSize);
+			} else if (matchesKey(data, Key.pageDown)) {
+				this.cursor = Math.min(
+					Math.max(0, this.rowLabels.length - 1),
+					this.cursor + this.viewSize,
+				);
+			}
+			return;
+		}
+		if (matchesKey(data, Key.escape)) {
+			this.done();
+		} else if (data === "e") {
+			this.usageCursor = this.cursor;
+			this.usageOffset = this.offset;
+			this.screen = "estimate-provider";
+			this.resetCursor();
 		} else if (data === "t" || data === "7" || data === "3" || data === "a") {
 			this.period = data === "t" ? "today" : data === "7" ? "7d" : data === "3" ? "30d" : "all";
 			this.resetCursor();
@@ -126,6 +284,7 @@ class UsageDashboard {
 	}
 
 	render(width: number) {
+		if (this.screen !== "usage") return this.renderEstimatePicker(width);
 		const periodEvents = eventsForPeriod(this.events, this.period);
 		const selected = periodEvents.filter(
 			(event) =>
@@ -133,6 +292,12 @@ class UsageDashboard {
 				(!this.filters.provider || event.provider === this.filters.provider),
 		);
 		const totals = totalsForPeriod(selected, "all");
+		const paygEstimate = this.estimateTarget
+			? estimateModelCost(selected, this.estimateTarget)
+			: undefined;
+		const paygLabel = paygEstimate !== undefined && Number.isFinite(paygEstimate)
+			? `$${paygEstimate.toFixed(paygEstimate >= 100 ? 0 : 2)}`
+			: undefined;
 		const grouped = new Map<string, UsageEvent[]>();
 		for (const event of selected) {
 			const key = String(event[this.group] ?? "unknown");
@@ -165,9 +330,14 @@ class UsageDashboard {
 			`${this.theme.fg("dim", label)} ${this.theme.fg("accent", this.theme.bold(value))}`;
 		const wideContent = [
 			this.theme.fg("accent", this.theme.bold(` Usage · ${this.period} · ${location}`)),
-			this.theme.fg("dim", " ↑↓ select   Enter drill down   ← back   Esc close"),
+			this.theme.fg("dim", " ↑↓ select   Enter drill down   e estimate   Esc close"),
 			"",
-			` ${stat("TOTAL", formatTokens(totals.total))}     ${stat("REQUESTS", this.number.format(totals.requests))}     ${stat("COST", costLabel(totals))}     ${stat("CACHE READ", formatTokens(totals.cacheRead))}`,
+			` ${stat("TOTAL", formatTokens(totals.total))}     ${stat("REQUESTS", this.number.format(totals.requests))}     ${stat("API EQ", costLabel(totals))}     ${stat("CACHE READ", formatTokens(totals.cacheRead))}`,
+			...(this.estimateTarget && paygLabel
+				? [
+						` ${stat("EST PAYG", paygLabel)}     ${this.theme.fg("dim", `${this.estimateTarget.provider} / ${this.estimateTarget.name} · current catalog rates · recorded cache mix`)}`,
+					]
+				: []),
 			"",
 			this.theme.fg(
 				"dim",
@@ -183,13 +353,18 @@ class UsageDashboard {
 			"",
 			this.theme.fg(
 				"dim",
-				" t today · 7 7d · 3 30d · a all time · o other sources",
+				" t today · 7 7d · 3 30d · a all time · o other sources · e estimate",
 			),
 		];
 		const activeRow = rows[this.cursor];
 		const compactContent = [
 			this.theme.fg("accent", this.theme.bold(` Usage · ${this.period} · ${location}`)),
 			` ${formatTokens(totals.total)} total · ${this.number.format(totals.requests)} requests`,
+			...(this.estimateTarget && paygLabel
+				? [
+						` ${this.theme.fg("accent", `Est PAYG ${paygLabel}`)} · ${this.estimateTarget.provider}/${this.estimateTarget.name}`,
+					]
+				: []),
 			"",
 			...visibleRows.map(({ label, totals: rowTotals }, visibleIndex) => {
 				const rowIndex = this.offset + visibleIndex;
@@ -204,26 +379,17 @@ class UsageDashboard {
 						this.theme.fg("accent", ` ${activeRow.label}`),
 						` Input ${formatTokens(activeRow.totals.input)} · Output ${formatTokens(activeRow.totals.output)} · Requests ${this.number.format(activeRow.totals.requests)}`,
 						` Cache R ${formatTokens(activeRow.totals.cacheRead)} · Cache W ${formatTokens(activeRow.totals.cacheWrite)} · Reasoning ${formatTokens(activeRow.totals.reasoning)}`,
-						` Cost ${costLabel(activeRow.totals)}`,
+						` API eq ${costLabel(activeRow.totals)}`,
 					]
 				: []),
 			"",
 			this.theme.fg(
 				"dim",
-				" ↑↓ select · Enter drill · ← back · o other sources · Esc close",
+				" ↑↓ select · Enter drill · ← back · o sources · e estimate · Esc close",
 			),
 		];
 		const content = width < 100 ? compactContent : wideContent;
-		const innerWidth = Math.max(38, width - 2);
-		const framedRow = (line: string) => {
-			const clipped = truncateToWidth(line, innerWidth);
-			return `${this.theme.fg("border", "│")}${clipped}${" ".repeat(Math.max(0, innerWidth - visibleWidth(clipped)))}${this.theme.fg("border", "│")}`;
-		};
-		return [
-			this.theme.fg("border", `╭${"─".repeat(innerWidth)}╮`),
-			...content.map(framedRow),
-			this.theme.fg("border", `╰${"─".repeat(innerWidth)}╯`),
-		];
+		return this.frame(content, width);
 	}
 
 	invalidate() {}
@@ -267,9 +433,36 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
+			const hasCompleteRates = (cost: PriceRates) =>
+				[cost?.input, cost?.output, cost?.cacheRead, cost?.cacheWrite].every(Number.isFinite);
+			const pricingModels = [
+				...new Map(
+					ctx.modelRegistry
+						.getAll()
+						.filter((model) => {
+							const cost = model.cost as PriceRates;
+							const rates = [cost?.input, cost?.output, cost?.cacheRead, cost?.cacheWrite];
+							return (
+								hasCompleteRates(cost) &&
+								(cost.tiers ?? []).every(hasCompleteRates) &&
+								rates.some((rate) => Number(rate) > 0)
+							);
+						})
+						.map((model) => [
+							`${model.provider}/${model.id}`,
+							{
+								provider: model.provider,
+								id: model.id,
+								name: model.name || model.id,
+								cost: model.cost,
+							} as PricingModel,
+						]),
+				).values(),
+			];
+
 			await ctx.ui.custom<void>(
 				(tui, theme, _keys, done) => {
-					const view = new UsageDashboard(result.events, period, done, theme);
+					const view = new UsageDashboard(result.events, pricingModels, period, done, theme);
 					return {
 						render: (width: number) => view.render(width),
 						invalidate: () => view.invalidate(),

@@ -29,7 +29,7 @@ function makeEvent(base, usage = {}) {
  return event;
 }
 
-const piUsage = usage => usage && ({ input:usage.input, output:usage.output, cacheRead:usage.cacheRead, cacheWrite:usage.cacheWrite, reasoning:usage.reasoning, total:usage.totalTokens, costUsd:usage.cost?.total });
+const piUsage = usage => usage && ({ input:usage.input, output:usage.output, cacheRead:usage.cacheRead, cacheWrite:usage.cacheWrite, cacheWrite5m:Math.max(0,n(usage.cacheWrite)-n(usage.cacheWrite1h)), cacheWrite1h:usage.cacheWrite1h, reasoning:usage.reasoning, total:usage.totalTokens, costUsd:usage.cost?.total });
 const claudeUsage = usage => ({ input:usage.input_tokens, output:usage.output_tokens, cacheRead:usage.cache_read_input_tokens, cacheWrite:usage.cache_creation_input_tokens, cacheWrite5m:usage.cache_creation?.ephemeral_5m_input_tokens, cacheWrite1h:usage.cache_creation?.ephemeral_1h_input_tokens, total:n(usage.input_tokens) + n(usage.output_tokens) + n(usage.cache_read_input_tokens) + n(usage.cache_creation_input_tokens) });
 const codexDelta = (current, previous) => Object.fromEntries(CODEX_KEYS.map(key => [key, Math.max(0, n(current[key]) - n(previous?.[key]))]));
 const hasTokens = usage => CODEX_KEYS.some(key => n(usage[key]) > 0);
@@ -180,8 +180,8 @@ async function appendedLines(path, offset, size) {
 }
 
 const specs = roots => [["pi",roots.pi,path=>path.endsWith(".jsonl")],["claude",roots.claude,path=>path.endsWith(".jsonl")],["codex",roots.codex,path=>path.endsWith(".jsonl")],["grok",roots.grok,path=>basename(path)==="updates.jsonl"]];
-const emptyIndex = () => ({version:2,events:[],files:{},codex:{}});
-export async function loadIndex(path) { try { const index=JSON.parse(await readFile(path,"utf8")); return index?.version === 2 ? index : emptyIndex(); } catch { return emptyIndex(); } }
+const emptyIndex = () => ({version:3,events:[],files:{},codex:{}});
+export async function loadIndex(path) { try { const index=JSON.parse(await readFile(path,"utf8")); return index?.version === 3 ? index : emptyIndex(); } catch { return emptyIndex(); } }
 export async function saveIndex(path,index) { await mkdir(dirname(path),{recursive:true}); const temporary=`${path}.${process.pid}.${Date.now()}.tmp`; await writeFile(temporary,JSON.stringify(index),"utf8"); await rename(temporary,path); }
 
 export async function importAll(roots, index = emptyIndex()) {
@@ -216,5 +216,21 @@ export async function importAll(roots, index = emptyIndex()) {
 // Retained for callers with an externally assembled batch.
 export function mergeIndex(index,events) { const map=new Map(index.events.map(event=>[identity(event.source,event.sessionId,event.key),event])); for(const event of events) map.set(identity(event.source,event.sessionId,event.key),event); return {...index,events:[...map.values()]}; }
 export function eventsForPeriod(events,period="all",now=new Date(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone) { const formatter=new Intl.DateTimeFormat("en-CA",{timeZone,year:"numeric",month:"2-digit",day:"2-digit"}); const day=date=>formatter.format(date); const today=day(now), start=new Date(now); if(period!=="all") start.setDate(start.getDate()-(period==="today"?0:period==="7d"?6:29)); const startDay=day(start); return events.filter(event=>period==="all" || day(new Date(event.timestamp))>=startDay && day(new Date(event.timestamp))<=today); }
-export function totalsForPeriod(events,period="all",now=new Date(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone) { return eventsForPeriod(events,period,now,timeZone).reduce((total,event)=>{total.requests++; for(const key of TOKEN_KEYS) total[key]+=event[key]; const cost=(event.costUsd || 0)+(event.costNativeTicks || 0)/1e10; if(event.costBasis === "recorded") { total.recordedCost+=cost; total.recordedCostItems++; } else if(event.costBasis === "estimated") { total.estimatedCost+=cost; total.estimatedCostItems++; } else total.unavailableCost++; return total;},{requests:0,input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,total:0,recordedCost:0,recordedCostItems:0,estimatedCost:0,estimatedCostItems:0,unavailableCost:0}); }
+export function totalsForPeriod(events,period="all",now=new Date(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone) { return eventsForPeriod(events,period,now,timeZone).reduce((total,event)=>{total.requests++; for(const key of TOKEN_KEYS) total[key]+=event[key]; total.cacheWrite5m+=event.cacheWrite5m || 0; total.cacheWrite1h+=event.cacheWrite1h || 0; const cost=(event.costUsd || 0)+(event.costNativeTicks || 0)/1e10; if(event.costBasis === "recorded") { total.recordedCost+=cost; total.recordedCostItems++; } else if(event.costBasis === "estimated") { total.estimatedCost+=cost; total.estimatedCostItems++; } else total.unavailableCost++; return total;},{requests:0,input:0,output:0,cacheRead:0,cacheWrite:0,cacheWrite5m:0,cacheWrite1h:0,reasoning:0,total:0,recordedCost:0,recordedCostItems:0,estimatedCost:0,estimatedCostItems:0,unavailableCost:0}); }
+export function estimateModelCost(usages,model) {
+ const base=model?.cost;
+ if (!base) return undefined;
+ const items=Array.isArray(usages) ? usages : [usages];
+ let total=0;
+ for (const usage of items) {
+  const inputTokens=n(usage.input)+n(usage.cacheRead)+n(usage.cacheWrite);
+  let rates=base, threshold=-1;
+  for (const tier of base.tiers || []) if (inputTokens > tier.inputTokensAbove && tier.inputTokensAbove > threshold) { rates=tier; threshold=tier.inputTokensAbove; }
+  for (const key of ["input","output","cacheRead","cacheWrite"]) if (!Number.isFinite(rates[key])) return undefined;
+  const longWrite=Math.min(n(usage.cacheWrite1h),n(usage.cacheWrite));
+  const shortWrite=n(usage.cacheWrite)-longWrite;
+  total+=(rates.input*n(usage.input)+rates.output*n(usage.output)+rates.cacheRead*n(usage.cacheRead)+rates.cacheWrite*shortWrite+rates.input*2*longWrite)/1_000_000;
+ }
+ return total;
+}
 export const groupEvents = events => [...events.reduce((map,event)=>{const key=`${event.source} | ${event.provider} | ${event.model}`; const group=map.get(key)||{label:key,events:[]}; group.events.push(event); map.set(key,group); return map;},new Map()).values()];
