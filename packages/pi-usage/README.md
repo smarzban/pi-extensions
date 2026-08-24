@@ -12,7 +12,7 @@ Run `/usage` to scan local session metadata and open today's centered overlay da
 
 ## Data and privacy
 
-`pi-usage` reads only whitelisted usage fields from JSONL session stores and writes a local, normalized JSON index at `~/.pi/agent/pi-usage/index.json`. The index includes source session identifiers and local source-file paths for incremental reconciliation, but never transcript content. It never sends network requests, reads credentials, or retains prompts, code, tool input, or raw transcript lines.
+`pi-usage` reads only whitelisted usage fields from JSONL session stores and writes a local, normalized JSON index at `~/.pi/agent/pi-usage/index.json` with private directory and file permissions. Malformed JSONL records are skipped, and a single line over 64 MiB is discarded rather than retained or retried indefinitely. The index includes source session identifiers and local source-file paths for incremental reconciliation, but never transcript content. It never sends network requests, reads credentials, or retains prompts, code, tool input, or raw transcript lines.
 
 It imports Pi sessions, Claude Code assistant usage, Codex cumulative token snapshots, and Grok Build `turn_completed` usage. When Pi stores a nested aggregate with explicit local child-session links, the aggregate is omitted only if every linked child resolves to files scanned in the same import; otherwise it remains. Cursor is intentionally unsupported because reliable local usage counters are not available and its database contains credentials.
 

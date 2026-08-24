@@ -10,6 +10,10 @@ import {
 	saveIndex,
 	totalsForPeriod,
 	filterEvents,
+	pricingModelsFromRegistry,
+	sanitizeFilterInput,
+	sanitizeLabel,
+	sourceRoots,
 } from "./core.mjs";
 import { bucketEvents, renderBrailleGraph } from "./graph.mjs";
 
@@ -72,7 +76,8 @@ class UsageDashboard {
 	private usageCursor = 0;
 	private usageOffset = 0;
 	private rowLabels: string[] = [];
-	private viewSize = 15;
+	private viewSize = 8;
+	private periodCache = new Map<Period, UsageEvent[]>();
 	private view: "table" | "graph" = "table";
 	private graphMetric: "fresh" | "cacheRead" = "fresh";
 	private query = "";
@@ -80,12 +85,21 @@ class UsageDashboard {
 	private readonly number = new Intl.NumberFormat();
 	private readonly rate = new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 });
 
+	private eventsInPeriod() {
+		const cached = this.periodCache.get(this.period);
+		if (cached) return cached;
+		const selected = eventsForPeriod(this.events, this.period);
+		this.periodCache.set(this.period, selected);
+		return selected;
+	}
+
 	constructor(
 		private readonly events: UsageEvent[],
 		private readonly pricingModels: PricingModel[],
 		period: Period,
 		private readonly done: () => void,
 		private readonly theme: any,
+		private readonly terminalRows: () => number = () => 24,
 	) {
 		this.period = period;
 	}
@@ -137,7 +151,8 @@ class UsageDashboard {
 	}
 
 	private renderEstimatePicker(width: number) {
-		this.viewSize = width < 100 ? 12 : 18;
+		const maxRows = width < 100 ? 12 : 18;
+		this.viewSize = Math.max(1, Math.min(maxRows, Math.floor(this.terminalRows() * 0.9) - 8));
 		if (this.screen === "estimate-provider") {
 			const counts = new Map<string, number>();
 			for (const model of this.pricingModels) {
@@ -265,8 +280,8 @@ class UsageDashboard {
 			else if (matchesKey(data, Key.enter)) this.typingFilter = false;
 			else if (matchesKey(data, Key.backspace)) this.query = this.query.slice(0, -1);
 			else {
-				const printable = data.replace(/\x1b\[\d+~/gu, "").replace(/[\x00-\x1f\x7f]/gu, "");
-				if (printable) this.query += printable;
+				const printable = sanitizeFilterInput(data);
+				if (printable) this.query = `${this.query}${printable}`.slice(0, 160);
 			}
 			this.resetCursor();
 			return;
@@ -333,7 +348,7 @@ class UsageDashboard {
 
 	render(width: number) {
 		if (this.screen !== "usage") return this.renderEstimatePicker(width);
-		const periodEvents = eventsForPeriod(this.events, this.period);
+		const periodEvents = this.eventsInPeriod();
 		const selected = filterEvents(periodEvents.filter(
 			(event) =>
 				(!this.filters.source || event.source === this.filters.source) &&
@@ -357,7 +372,9 @@ class UsageDashboard {
 			.map(([label, events]) => ({ label, totals: totalsForPeriod(events, "all") }))
 			.sort((left, right) => right.totals.total - left.totals.total);
 		this.rowLabels = rows.map((row) => row.label);
-		this.viewSize = width < 100 ? 8 : 15;
+		const maxRows = width < 100 ? 8 : 15;
+		const chromeRows = (width < 100 ? 13 : 12) + (this.estimateTarget && paygLabel ? 2 : 0) + (this.typingFilter || this.query ? 1 : 0);
+		this.viewSize = Math.max(1, Math.min(maxRows, Math.floor(this.terminalRows() * 0.9) - chromeRows));
 		this.cursor = Math.min(this.cursor, Math.max(0, rows.length - 1));
 		if (this.cursor < this.offset) this.offset = this.cursor;
 		if (this.cursor >= this.offset + this.viewSize) {
@@ -393,12 +410,12 @@ class UsageDashboard {
 			"",
 			this.theme.fg(
 				"dim",
-				"  Name                       Requests  Fresh  Input  Output  Cache R  Cache W  Reasoning  Cost",
+				"  Name                       Requests  Fresh  Total  Input  Output  Cache R  Cache W  Reasoning  Cost",
 			),
 			...visibleRows.map(({ label, totals: rowTotals }, visibleIndex) => {
 				const rowIndex = this.offset + visibleIndex;
 				const marker = rowIndex === this.cursor ? "›" : " ";
-				const line = `${marker} ${label.padEnd(26).slice(0, 26)} ${this.number.format(rowTotals.requests).padStart(8)} ${formatTokens(rowTotals.fresh).padStart(6)} ${formatTokens(rowTotals.input).padStart(6)} ${formatTokens(rowTotals.output).padStart(7)} ${formatTokens(rowTotals.cacheRead).padStart(8)} ${formatTokens(rowTotals.cacheWrite).padStart(8)} ${formatTokens(rowTotals.reasoning).padStart(10)}  ${costLabel(rowTotals)}`;
+				const line = `${marker} ${sanitizeLabel(label).padEnd(26).slice(0, 26)} ${this.number.format(rowTotals.requests).padStart(8)} ${formatTokens(rowTotals.fresh).padStart(6)} ${formatTokens(rowTotals.total).padStart(6)} ${formatTokens(rowTotals.input).padStart(6)} ${formatTokens(rowTotals.output).padStart(7)} ${formatTokens(rowTotals.cacheRead).padStart(8)} ${formatTokens(rowTotals.cacheWrite).padStart(8)} ${formatTokens(rowTotals.reasoning).padStart(10)}  ${costLabel(rowTotals)}`;
 				return rowIndex === this.cursor ? this.theme.fg("accent", line) : line;
 			}),
 			...(rangeLine ? [rangeLine] : []),
@@ -423,7 +440,7 @@ class UsageDashboard {
 			...visibleRows.map(({ label, totals: rowTotals }, visibleIndex) => {
 				const rowIndex = this.offset + visibleIndex;
 				const marker = rowIndex === this.cursor ? "›" : " ";
-				const line = `${marker} ${label.padEnd(24).slice(0, 24)} ${this.number.format(rowTotals.requests).padStart(7)} req  ${formatTokens(rowTotals.fresh).padStart(7)} fresh`;
+				const line = `${marker} ${sanitizeLabel(label).padEnd(24).slice(0, 24)} ${this.number.format(rowTotals.requests).padStart(7)} req  ${formatTokens(rowTotals.fresh).padStart(7)} fresh`;
 				return rowIndex === this.cursor ? this.theme.fg("accent", line) : line;
 			}),
 			...(rangeLine ? [rangeLine] : []),
@@ -478,19 +495,7 @@ export default function (pi: ExtensionAPI) {
 				: "today";
 			const indexPath = join(getAgentDir(), "pi-usage", "index.json");
 			const previous = requested === "rebuild" ? undefined : await loadIndex(indexPath);
-			const home = homedir();
-			const result = await importAll(
-				{
-					pi: join(getAgentDir(), "sessions"),
-					claude: join(home, ".claude", "projects"),
-					codex: [
-						join(home, ".codex", "sessions"),
-						join(home, ".codex", "archived_sessions"),
-					],
-					grok: join(home, ".grok", "sessions"),
-				},
-				previous,
-			);
+			const result = await importAll(sourceRoots(homedir(), getAgentDir()), previous);
 			await saveIndex(indexPath, result.index);
 
 			if (ctx.mode !== "tui") {
@@ -502,36 +507,11 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			const hasCompleteRates = (cost: PriceRates) =>
-				[cost?.input, cost?.output, cost?.cacheRead, cost?.cacheWrite].every(Number.isFinite);
-			const pricingModels = [
-				...new Map(
-					ctx.modelRegistry
-						.getAll()
-						.filter((model) => {
-							const cost = model.cost as PriceRates;
-							const rates = [cost?.input, cost?.output, cost?.cacheRead, cost?.cacheWrite];
-							return (
-								hasCompleteRates(cost) &&
-								(cost.tiers ?? []).every(hasCompleteRates) &&
-								rates.some((rate) => Number(rate) > 0)
-							);
-						})
-						.map((model) => [
-							`${model.provider}/${model.id}`,
-							{
-								provider: model.provider,
-								id: model.id,
-								name: model.name || model.id,
-								cost: model.cost,
-							} as PricingModel,
-						]),
-				).values(),
-			];
+			const pricingModels = pricingModelsFromRegistry(ctx.modelRegistry.getAll()) as PricingModel[];
 
 			await ctx.ui.custom<void>(
 				(tui, theme, _keys, done) => {
-					const view = new UsageDashboard(result.events, pricingModels, period, done, theme);
+					const view = new UsageDashboard(result.events, pricingModels, period, done, theme, () => tui.terminal.rows);
 					return {
 						render: (width: number) => view.render(width),
 						invalidate: () => view.invalidate(),

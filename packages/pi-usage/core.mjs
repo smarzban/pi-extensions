@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { open, readdir, readFile, rename, stat, mkdir, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { chmod, open, readdir, readFile, rename, stat, mkdir, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 
 const TOKEN_KEYS = ["input", "output", "cacheRead", "cacheWrite", "reasoning", "total"];
@@ -12,19 +12,27 @@ const validTimestamp = value => {
  return Number.isFinite(timestamp) ? timestamp : undefined;
 };
 const hash = value => createHash("sha256").update(value).digest("hex");
+const LABEL_LIMIT = 160;
+export const sanitizeLabel = value => String(value ?? "unknown").replace(/\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|\[[0-?]*[ -/]*[@-~]|O.|[()][0-?]*[ -/]*[@-~])|[\x00-\x1f\x7f]/gu, "").replace(/\s+/gu, " ").trim().slice(0, LABEL_LIMIT) || "unknown";
+export const sanitizeFilterInput = value => String(value ?? "").replace(/\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|\[[0-?]*[ -/]*[@-~]|O.)/gu, "").replace(/[\x00-\x1f\x7f]/gu, "").slice(0,LABEL_LIMIT);
 export const freshTokens = usage => n(usage.input) + n(usage.output) + n(usage.cacheWrite);
 export const filterEvents = (events, query = "") => {
  const needle = query.trim().toLocaleLowerCase();
  return needle ? events.filter(event => [event.source,event.provider,event.model].some(value => String(value).toLocaleLowerCase().includes(needle))) : events;
 };
-// Pi fork/clone records are byte-for-byte copied into another session file, so their
-// serialized-entry hash deliberately spans the entire Pi lineage rather than one session.
+// Pi entry ids survive fork serialization and format migration, so identities span a lineage.
+// Rows without ids fall back to a normalized accounting fingerprint rather than raw JSON bytes.
 const identity = (source, sessionId, key) => source === "pi" || source === "claude" ? `${source}:${key}` : `${source}:${sessionId}:${key}`;
+const piKey = (row, usage, timestamp) => {
+ const accounting = {type:row.type,role:row.message?.role,parentId:row.parentId ?? row.message?.parentId,timestamp,usage:{input:n(usage?.input),output:n(usage?.output),cacheRead:n(usage?.cacheRead),cacheWrite:n(usage?.cacheWrite),reasoning:n(usage?.reasoning),total:n(usage?.totalTokens)}};
+ const stable = row.id || row.message?.id;
+ return `${stable ? `entry:${stable}` : "normalized"}:${hash(JSON.stringify(accounting))}`;
+};
 
 function makeEvent(base, usage = {}) {
  const timestamp = validTimestamp(base.timestamp);
  if (timestamp === undefined) return undefined;
- const event = { source:base.source, sessionId:base.sessionId || "unknown", key:base.key, timestamp, provider:base.provider || "unknown", model:base.model || "unknown", kind:base.kind || "main", costBasis:base.costBasis || "unavailable", origin:base.origin };
+ const event = { source:base.source, sessionId:base.sessionId || "unknown", key:base.key, timestamp, provider:sanitizeLabel(base.provider), model:sanitizeLabel(base.model), kind:base.kind || "main", costBasis:base.costBasis || "unavailable", origin:base.origin };
  for (const key of TOKEN_KEYS) event[key] = n(usage[key]);
  if (event.reasoning > event.output) event.reasoning = event.output;
  if (usage.cacheWrite5m !== undefined) event.cacheWrite5m = n(usage.cacheWrite5m);
@@ -35,7 +43,7 @@ function makeEvent(base, usage = {}) {
 }
 
 const disjointInput = (input, cacheRead, cacheWrite) => Math.max(0,n(input)-n(cacheRead)-n(cacheWrite));
-const piUsage = usage => usage && ({ input:usage.input, output:usage.output, cacheRead:usage.cacheRead, cacheWrite:usage.cacheWrite, cacheWrite5m:Math.max(0,n(usage.cacheWrite)-n(usage.cacheWrite1h)), cacheWrite1h:usage.cacheWrite1h, reasoning:usage.reasoning, total:usage.totalTokens, costUsd:usage.cost?.total });
+const piUsage = usage => usage && ({ input:usage.input, output:usage.output, cacheRead:usage.cacheRead, cacheWrite:usage.cacheWrite, cacheWrite5m:Math.max(0,n(usage.cacheWrite)-n(usage.cacheWrite1h)), cacheWrite1h:usage.cacheWrite1h, reasoning:usage.reasoning, total:usage.totalTokens, ...(Number.isFinite(usage.cost?.total) ? {costUsd:usage.cost.total} : {}) });
 const claudeUsage = usage => ({ input:usage.input_tokens, output:usage.output_tokens, cacheRead:usage.cache_read_input_tokens, cacheWrite:usage.cache_creation_input_tokens, cacheWrite5m:usage.cache_creation?.ephemeral_5m_input_tokens, cacheWrite1h:usage.cache_creation?.ephemeral_1h_input_tokens, total:n(usage.input_tokens) + n(usage.output_tokens) + n(usage.cache_read_input_tokens) + n(usage.cache_creation_input_tokens) });
 const codexDelta = (current, previous) => Object.fromEntries(CODEX_KEYS.map(key => [key, Math.max(0, n(current[key]) - n(previous?.[key]))]));
 const hasTokens = usage => CODEX_KEYS.some(key => n(usage[key]) > 0);
@@ -43,15 +51,17 @@ const hasTokens = usage => CODEX_KEYS.some(key => n(usage[key]) > 0);
 function piEvents(file, health) {
  const result = [];
  let sessionId = basename(file.path);
+ let lastProvider = "unknown", lastModel = "unknown";
  for (const line of file.lines) {
   const row = parse(line); if (!row) { health.malformed++; continue; }
   if (row.type === "session") { sessionId = row.id || sessionId; continue; }
   let usage, provider, model, kind = "main", timestamp;
-  if (row.type === "message") { usage = piUsage(row.message?.usage); provider = row.provider || row.message?.provider; model = row.model || row.message?.model; kind = row.message?.role === "toolResult" ? "nested-tool" : "main"; timestamp = row.timestamp || row.message?.timestamp; }
-  else if (row.type === "compaction" || row.type === "branch_summary") { usage = piUsage(row.usage); kind = "summary"; timestamp = row.timestamp; provider = row.provider; model = row.model; }
+  if (row.type === "message") { usage = piUsage(row.message?.usage); provider = row.provider || row.message?.provider; model = row.model || row.message?.model; kind = row.message?.role === "toolResult" ? "nested-tool" : "main"; timestamp = row.timestamp || row.message?.timestamp; if (row.message?.role === "assistant" && provider && model) { lastProvider = provider; lastModel = model; } }
+  else if (row.type === "compaction" || row.type === "branch_summary") { usage = piUsage(row.usage); kind = "summary"; timestamp = row.timestamp; provider = row.provider || lastProvider; model = row.model || lastModel; }
   else continue;
   if (!usage) continue;
-  const event = makeEvent({source:"pi",sessionId,key:hash(line),timestamp,provider,model,kind,costBasis:"recorded",origin:file.path}, usage);
+  const hasCost = Number.isFinite(usage.costUsd) && usage.costUsd >= 0;
+  const event = makeEvent({source:"pi",sessionId,key:piKey(row, row.message?.usage || row.usage, timestamp),timestamp,provider,model,kind,costBasis:hasCost ? "recorded" : "unavailable",origin:file.path}, usage);
   if (event) {
    // Keep only accounting-safe child references, never the tool payload that contained them.
    const messageDetails = row.message?.details;
@@ -107,7 +117,7 @@ function claudeCandidates(file, health) {
   if (row.type !== "assistant" || row.message?.model === "<synthetic>" || !row.message?.usage) continue;
   // message.id is stable across snapshots even when requestId is missing on one of them.
   const key = row.message.id || row.requestId; if (!key) { health.skipped++; continue; }
-  const event = makeEvent({source:"claude",sessionId:row.sessionId || basename(file.path),key,timestamp:row.timestamp,provider:"anthropic",model:row.message.model,kind:file.path.includes("/subagents/") ? "subagent" : "main",origin:file.path}, claudeUsage(row.message.usage));
+  const event = makeEvent({source:"claude",sessionId:row.sessionId || basename(file.path),key,timestamp:row.timestamp,provider:"anthropic",model:row.message.model,kind:/(^|[\\/])subagents([\\/]|$)/u.test(file.path) ? "subagent" : "main",origin:file.path}, claudeUsage(row.message.usage));
   if (event) result.push(event); else health.skipped++;
  }
  return result;
@@ -129,7 +139,8 @@ function grokEvents(file, health) {
   const sessionId = row.params?.sessionId || directorySessionId;
   for (const [model, modelUsage] of models) {
    const usage = modelUsage && typeof modelUsage === "object" ? modelUsage : aggregate;
-   const event = makeEvent({source:"grok",sessionId,key:`${promptId}:${model}`,timestamp:row.timestamp,provider:"xai",model,kind:"main",costBasis:"recorded",origin:file.path},{input:disjointInput(usage.inputTokens,usage.cachedReadTokens,usage.cacheCreationTokens),output:usage.outputTokens,cacheRead:usage.cachedReadTokens,cacheWrite:usage.cacheCreationTokens,reasoning:usage.reasoningTokens,total:usage.totalTokens,costNativeTicks:usage.costUsdTicks ?? (models.length === 1 ? aggregate.costUsdTicks : undefined)});
+   const ticks = usage.costUsdTicks ?? (models.length === 1 ? aggregate.costUsdTicks : undefined);
+   const event = makeEvent({source:"grok",sessionId,key:`${promptId}:${model}`,timestamp:row.timestamp,provider:"xai",model,kind:"main",costBasis:Number.isSafeInteger(ticks) && ticks >= 0 ? "recorded" : "unavailable",origin:file.path},{input:disjointInput(usage.inputTokens,usage.cachedReadTokens,usage.cacheCreationTokens),output:usage.outputTokens,cacheRead:usage.cachedReadTokens,cacheWrite:usage.cacheCreationTokens,reasoning:usage.reasoningTokens,total:usage.totalTokens,costNativeTicks:ticks});
    if (event) result.push(event); else health.skipped++;
   }
  }
@@ -153,7 +164,6 @@ function codexEvents(file, health, state, parserState = {}) {
     sessionId = row.payload?.id || sessionId;
     provider = row.payload?.model_provider || provider;
     kind = row.payload?.thread_source === "subagent" ? "subagent" : "main";
-    parserState.threadId = row.payload?.session_id;
     metadataSeen = true;
    }
    continue;
@@ -200,45 +210,45 @@ export function collectLines(source, files) {
 
 export async function walkJsonl(root, matcher = () => true) { const result=[]; async function visit(dir) { let entries; try { entries=await readdir(dir,{withFileTypes:true}); } catch { return; } for (const entry of entries) { const path=join(dir,entry.name); if (entry.isDirectory()) await visit(path); else if (entry.isFile() && matcher(path)) result.push(path); } } await visit(root); return result; }
 
-async function appendedLines(path, offset, size) {
- const handle = await open(path, "r");
- let position = offset;
- let carry = Buffer.alloc(0);
- const lines = [];
- try {
-  while (position < size) {
-   const length = Math.min(64 * 1024, size - position);
-   const buffer = Buffer.allocUnsafe(length);
-   const {bytesRead} = await handle.read(buffer, 0, length, position);
-   if (!bytesRead) break;
-   position += bytesRead;
-   const combined = carry.length
-    ? Buffer.concat([carry, buffer.subarray(0, bytesRead)])
-    : buffer.subarray(0, bytesRead);
-   const newline = combined.lastIndexOf(0x0a);
-   if (newline < 0) { carry = Buffer.from(combined); continue; }
-   const complete = combined.subarray(0, newline + 1).toString("utf8");
-   const parts = complete.split("\n");
-   parts.pop();
-   lines.push(...parts);
-   carry = Buffer.from(combined.subarray(newline + 1));
+export const MAX_JSONL_LINE_BYTES = 64 * 1024 * 1024;
+/** Bounded scanner: oversized lines are discarded without retaining their contents. */
+export function scanJsonlChunks(chunks, cap = MAX_JSONL_LINE_BYTES, state = {}) {
+ const lines=[]; let parts=state.parts || [], carryBytes=state.carryBytes || 0, discarding=state.discarding || false, consumed=0, skipped=state.skipped || 0;
+ for (const chunk of chunks) {
+  consumed+=chunk.length; let start=0;
+  while (start < chunk.length) {
+   const newline=chunk.indexOf(0x0a,start), end=newline < 0 ? chunk.length : newline, part=chunk.subarray(start,end);
+   if (discarding) { if (newline >= 0) discarding=false; }
+   else if (carryBytes + part.length > cap) { skipped++; parts=[]; carryBytes=0; discarding=newline < 0; }
+   else {
+    if (part.length) { parts.push(Buffer.from(part)); carryBytes+=part.length; }
+    if (newline >= 0) { lines.push(parts.length === 1 ? parts[0].toString("utf8") : Buffer.concat(parts,carryBytes).toString("utf8")); parts=[]; carryBytes=0; }
+   }
+   if (newline < 0) break;
+   start=newline+1;
   }
- } finally { await handle.close(); }
- // Do not advance beyond an incomplete write. It is re-read after the writer terminates its line.
- return { lines, offset: position - carry.length };
+ }
+ return {lines,parts,carryBytes,discarding,skipped,consumed};
+}
+async function appendedLines(path, offset, size, cap = MAX_JSONL_LINE_BYTES) {
+ const handle=await open(path,"r"); let position=offset,state={},skipped=0; const lines=[];
+ try { while (position < size) { const buffer=Buffer.allocUnsafe(Math.min(64*1024,size-position)); const {bytesRead}=await handle.read(buffer,0,buffer.length,position); if (!bytesRead) break; position+=bytesRead; const scanned=scanJsonlChunks([buffer.subarray(0,bytesRead)],cap,state); lines.push(...scanned.lines); state=scanned; skipped=scanned.skipped; } } finally { await handle.close(); }
+ // A normal torn tail remains for next scan; a malformed oversized tail is consumed permanently.
+ return {lines,offset:state.discarding ? position : position-(state.carryBytes || 0),skipped};
 }
 
+export const sourceRoots = (home,agentDir) => ({pi:join(agentDir,"sessions"),claude:join(home,".claude","projects"),codex:[join(home,".codex","sessions"),join(home,".codex","archived_sessions")],grok:join(home,".grok","sessions")});
 const specs = roots => [["pi",roots.pi,path=>path.endsWith(".jsonl")],["claude",roots.claude,path=>path.endsWith(".jsonl")],["codex",roots.codex,path=>path.endsWith(".jsonl")],["grok",roots.grok,path=>basename(path)==="updates.jsonl"]];
-const emptyIndex = () => ({version:6,events:[],files:{},codex:{}});
-export async function loadIndex(path) { try { const index=JSON.parse(await readFile(path,"utf8")); return index?.version === 6 ? index : emptyIndex(); } catch { return emptyIndex(); } }
-export async function saveIndex(path,index) { await mkdir(dirname(path),{recursive:true}); const temporary=`${path}.${process.pid}.${Date.now()}.tmp`; await writeFile(temporary,JSON.stringify(index),"utf8"); await rename(temporary,path); }
+const emptyIndex = () => ({version:7,events:[],files:{},codex:{}});
+export async function loadIndex(path) { try { const index=JSON.parse(await readFile(path,"utf8")); return index?.version === 7 ? index : emptyIndex(); } catch { return emptyIndex(); } }
+export async function saveIndex(path,index) { await mkdir(dirname(path),{recursive:true,mode:0o700}); await chmod(dirname(path),0o700); const temporary=`${path}.${process.pid}.${randomUUID()}.tmp`; try { await writeFile(temporary,JSON.stringify(index),{encoding:"utf8",mode:0o600,flag:"wx"}); await rename(temporary,path); await chmod(path,0o600); } catch (error) { await unlink(temporary).catch(()=>{}); throw error; } }
 
-export async function importAll(roots, index = emptyIndex()) {
+export async function importAll(roots, index = emptyIndex(), hooks = {}) {
  const next = structuredClone(index); const health=[];
  for (const [source, root, matcher] of specs(roots)) {
-  const rootList = (Array.isArray(root) ? root : [root]).filter(Boolean); if (!rootList.length) { health.push({source,status:"unavailable",files:0,malformed:0,skipped:0}); continue; }
+  const rootList = (Array.isArray(root) ? root : [root]).filter(Boolean); if (!rootList.length) { const stale=Object.entries(next.files).filter(([,cursor])=>cursor.source===source); const reconciled=stale.length>0 || next.events.some(event=>event.source===source); next.events=next.events.filter(event=>event.source!==source); for(const [path] of stale) delete next.files[path]; if(source==="codex") next.codex={}; health.push({source,status:"unavailable",files:0,malformed:0,skipped:0,reconciled}); continue; }
   const availableRoots = await Promise.all(rootList.map(async value => { try { return (await stat(value)).isDirectory(); } catch { return false; } }));
-  if (!availableRoots.some(Boolean)) { health.push({source,status:"unavailable",files:0,malformed:0,skipped:0}); continue; }
+  if (!availableRoots.some(Boolean)) { const stale=Object.entries(next.files).filter(([,cursor])=>cursor.source===source); const reconciled=stale.length>0 || next.events.some(event=>event.source===source); next.events=next.events.filter(event=>event.source!==source); for(const [path] of stale) delete next.files[path]; if(source==="codex") next.codex={}; health.push({source,status:"unavailable",files:0,malformed:0,skipped:0,reconciled}); continue; }
   const paths=(await Promise.all(rootList.map(value=>walkJsonl(value,matcher)))).flat(); const known=Object.entries(next.files).filter(([,cursor])=>cursor.source === source);
   let reconcile = known.some(([path]) => !paths.includes(path));
   for (const path of paths) { try { const info=await stat(path); const cursor=next.files[path]; if (cursor && (info.size < cursor.size || info.mtimeMs < cursor.mtimeMs || info.size === cursor.size && info.mtimeMs !== cursor.mtimeMs || cursor.ino !== undefined && info.ino !== cursor.ino)) reconcile=true; } catch { reconcile=true; } }
@@ -248,8 +258,10 @@ export async function importAll(roots, index = emptyIndex()) {
   // unchanged files during a warm append. File paths are safe index metadata.
   const piFiles = source === "pi" ? paths.map(path => ({path,lines:[]})) : [];
   for (const path of paths) {
-   const info=await stat(path); const cursor=next.files[path]; if (!reconcile && cursor?.size === info.size && cursor.mtimeMs === info.mtimeMs) continue;
-   const {lines,offset}=await appendedLines(path,reconcile ? 0 : cursor?.offset || 0,info.size); const file={path,lines};
+   let info; try { info=await stat(path); } catch (error) { if (error?.code === "ENOENT") { reconcile=true; sourceHealth.reconciled=true; sourceHealth.skipped++; continue; } throw error; }
+   const cursor=next.files[path]; if (!reconcile && cursor?.size === info.size && cursor.mtimeMs === info.mtimeMs) continue;
+   let read; try { await hooks.beforeRead?.(path); read=await appendedLines(path,reconcile ? 0 : cursor?.offset || 0,info.size); } catch (error) { if (error?.code === "ENOENT") { reconcile=true; sourceHealth.reconciled=true; sourceHealth.skipped++; continue; } throw error; }
+   const {lines,offset,skipped}=read; sourceHealth.skipped+=skipped; const file={path,lines};
    if (source === "pi") candidates.push(...piEvents(file,sourceHealth));
    if (source === "claude") candidates.push(...claudeCandidates(file,sourceHealth));
    if (source === "grok") candidates.push(...grokEvents(file,sourceHealth));
@@ -272,15 +284,21 @@ export async function importAll(roots, index = emptyIndex()) {
 // Retained for callers with an externally assembled batch.
 export function mergeIndex(index,events) { const map=new Map(index.events.map(event=>[identity(event.source,event.sessionId,event.key),event])); for(const event of events) map.set(identity(event.source,event.sessionId,event.key),event); return {...index,events:[...map.values()]}; }
 export function eventsForPeriod(events,period="all",now=new Date(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone) {
+ if (period === "all") return events;
  const formatter=new Intl.DateTimeFormat("en",{timeZone,year:"numeric",month:"2-digit",day:"2-digit"});
- const day=date=>{const parts=Object.fromEntries(formatter.formatToParts(date).map(part=>[part.type,part.value])); return `${parts.year}-${parts.month}-${parts.day}`;};
- const today=day(now);
- let startDay=today;
+ const day=date=>{const parts=formatter.formatToParts(date); return `${parts.find(part=>part.type==="year").value}-${parts.find(part=>part.type==="month").value}-${parts.find(part=>part.type==="day").value}`;};
+ const today=day(now); let startDay=today;
  if (period === "month") startDay=`${today.slice(0,7)}-01`;
- else if (period !== "all") { const [year,month,date]=today.split("-").map(Number); const start=new Date(Date.UTC(year,month-1,date)); start.setUTCDate(start.getUTCDate()-(period==="today"?0:period==="7d"?6:29)); startDay=start.toISOString().slice(0,10); }
- return events.filter(event=>period==="all" || day(new Date(event.timestamp))>=startDay && day(new Date(event.timestamp))<=today);
+ else { const [year,month,date]=today.split("-").map(Number); const start=new Date(Date.UTC(year,month-1,date)); start.setUTCDate(start.getUTCDate()-(period==="today"?0:period==="7d"?6:29)); startDay=start.toISOString().slice(0,10); }
+ return events.filter(event=>{const eventDay=day(new Date(event.timestamp)); return eventDay>=startDay && eventDay<=today;});
 }
 export function totalsForPeriod(events,period="all",now=new Date(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone) { return eventsForPeriod(events,period,now,timeZone).reduce((total,event)=>{total.requests++; for(const key of TOKEN_KEYS) total[key]+=event[key]; total.fresh+=freshTokens(event); total.cacheWrite5m+=event.cacheWrite5m || 0; total.cacheWrite1h+=event.cacheWrite1h || 0; const cost=(event.costUsd || 0)+(event.costNativeTicks || 0)/1e10; if(event.costBasis === "recorded") { total.recordedCost+=cost; total.recordedCostItems++; } else if(event.costBasis === "estimated") { total.estimatedCost+=cost; total.estimatedCostItems++; } else total.unavailableCost++; return total;},{requests:0,input:0,output:0,cacheRead:0,cacheWrite:0,fresh:0,cacheWrite5m:0,cacheWrite1h:0,reasoning:0,total:0,recordedCost:0,recordedCostItems:0,estimatedCost:0,estimatedCostItems:0,unavailableCost:0}); }
+export function pricingModelsFromRegistry(models) {
+ const complete = cost => [cost?.input,cost?.output,cost?.cacheRead,cost?.cacheWrite].every(Number.isFinite);
+ const result=new Map();
+ for(const model of models || []) { const cost=model?.cost; if(!complete(cost) || !(cost.tiers||[]).every(complete) || ![cost.input,cost.output,cost.cacheRead,cost.cacheWrite].some(rate=>rate>0)) continue; const provider=sanitizeLabel(model.provider), id=sanitizeLabel(model.id); if (!result.has(`${provider}/${id}`)) result.set(`${provider}/${id}`,{provider,id,name:sanitizeLabel(model.name || model.id),cost:{...cost,tiers:cost.tiers?.map(tier=>({...tier}))}}); }
+ return [...result.values()];
+}
 export function estimateModelCost(usages,model) {
  const base=model?.cost;
  if (!base) return undefined;
