@@ -20,14 +20,6 @@ interface UsageEvent {
 	[key: string]: unknown;
 }
 
-interface SourceHealth {
-	source: string;
-	status: string;
-	files: number;
-	malformed: number;
-	skipped: number;
-}
-
 const formatTokens = (value: number) => {
 	if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
 	if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
@@ -60,7 +52,6 @@ class UsageDashboard {
 
 	constructor(
 		private readonly events: UsageEvent[],
-		private readonly health: SourceHealth[],
 		period: Period,
 		private readonly done: () => void,
 		private readonly theme: any,
@@ -185,15 +176,7 @@ class UsageDashboard {
 			}),
 			...(rangeLine ? [rangeLine] : []),
 			"",
-			this.theme.fg(
-				"warning",
-				" Reasoning and cache columns are source-native subsets, never add them to Total.",
-			),
-			this.theme.fg(
-				"dim",
-				` ${this.health.map((item) => `${item.source} ${item.status} (${item.files})`).join(" · ")} · Cursor unsupported`,
-			),
-			this.theme.fg("dim", " t today · 7 7d · 3 30d · a all · g grouping"),
+			this.theme.fg("dim", " t today · 7 7d · 3 30d · a all time · g grouping"),
 		];
 		const activeRow = rows[this.cursor];
 		const compactContent = [
@@ -275,7 +258,7 @@ export default function (pi: ExtensionAPI) {
 
 			await ctx.ui.custom<void>(
 				(tui, theme, _keys, done) => {
-					const view = new UsageDashboard(result.events, result.health, period, done, theme);
+					const view = new UsageDashboard(result.events, period, done, theme);
 					return {
 						render: (width: number) => view.render(width),
 						invalidate: () => view.invalidate(),
