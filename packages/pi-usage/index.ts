@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Key, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
+import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
 	eventsForPeriod,
 	importAll,
@@ -55,7 +55,7 @@ class UsageDashboard {
 	private cursor = 0;
 	private offset = 0;
 	private rowLabels: string[] = [];
-	private readonly pageSize = 15;
+	private viewSize = 15;
 	private readonly number = new Intl.NumberFormat();
 
 	constructor(
@@ -120,11 +120,11 @@ class UsageDashboard {
 		} else if (matchesKey(data, Key.down) || data === "j") {
 			this.cursor = Math.min(Math.max(0, this.rowLabels.length - 1), this.cursor + 1);
 		} else if (matchesKey(data, Key.pageUp)) {
-			this.cursor = Math.max(0, this.cursor - this.pageSize);
+			this.cursor = Math.max(0, this.cursor - this.viewSize);
 		} else if (matchesKey(data, Key.pageDown)) {
 			this.cursor = Math.min(
 				Math.max(0, this.rowLabels.length - 1),
-				this.cursor + this.pageSize,
+				this.cursor + this.viewSize,
 			);
 		}
 	}
@@ -148,59 +148,88 @@ class UsageDashboard {
 			.map(([label, events]) => ({ label, totals: totalsForPeriod(events, "all") }))
 			.sort((left, right) => right.totals.total - left.totals.total);
 		this.rowLabels = rows.map((row) => row.label);
+		this.viewSize = width < 100 ? 8 : 15;
 		this.cursor = Math.min(this.cursor, Math.max(0, rows.length - 1));
 		if (this.cursor < this.offset) this.offset = this.cursor;
-		if (this.cursor >= this.offset + this.pageSize) {
-			this.offset = this.cursor - this.pageSize + 1;
+		if (this.cursor >= this.offset + this.viewSize) {
+			this.offset = this.cursor - this.viewSize + 1;
 		}
-		const visibleRows = rows.slice(this.offset, this.offset + this.pageSize);
+		const visibleRows = rows.slice(this.offset, this.offset + this.viewSize);
 		const breadcrumb = [this.filters.source, this.filters.provider].filter(Boolean).join(" / ");
 		const location = breadcrumb ? `${breadcrumb} · ${this.group}` : `grouped by ${this.group}`;
 
-		const lines = [
-			this.theme.fg(
-				"accent",
-				this.theme.bold(` Usage: ${this.period} · ${location}`),
-			),
+		const rangeLine =
+			rows.length > this.viewSize
+				? this.theme.fg(
+						"dim",
+						`Rows ${this.offset + 1}-${Math.min(this.offset + this.viewSize, rows.length)} of ${rows.length}`,
+					)
+				: undefined;
+		const stat = (label: string, value: string) =>
+			`${this.theme.fg("dim", label)} ${this.theme.fg("accent", this.theme.bold(value))}`;
+		const wideContent = [
+			this.theme.fg("accent", this.theme.bold(` Usage · ${this.period} · ${location}`)),
+			this.theme.fg("dim", " ↑↓ select   Enter drill down   ← back   Esc close"),
+			"",
+			` ${stat("TOTAL", formatTokens(totals.total))}     ${stat("REQUESTS", this.number.format(totals.requests))}     ${stat("COST", costLabel(totals))}     ${stat("CACHE READ", formatTokens(totals.cacheRead))}`,
+			"",
 			this.theme.fg(
 				"dim",
 				"  Name                       Requests  Input  Output  Cache R  Cache W  Reasoning  Cost",
 			),
-			...visibleRows.map(({ label, totals }, visibleIndex) => {
+			...visibleRows.map(({ label, totals: rowTotals }, visibleIndex) => {
 				const rowIndex = this.offset + visibleIndex;
 				const marker = rowIndex === this.cursor ? "›" : " ";
-				const line = `${marker} ${label.padEnd(26).slice(0, 26)} ${this.number.format(totals.requests).padStart(8)} ${formatTokens(totals.input).padStart(6)} ${formatTokens(totals.output).padStart(7)} ${formatTokens(totals.cacheRead).padStart(8)} ${formatTokens(totals.cacheWrite).padStart(8)} ${formatTokens(totals.reasoning).padStart(10)}  ${costLabel(totals)}`;
+				const line = `${marker} ${label.padEnd(26).slice(0, 26)} ${this.number.format(rowTotals.requests).padStart(8)} ${formatTokens(rowTotals.input).padStart(6)} ${formatTokens(rowTotals.output).padStart(7)} ${formatTokens(rowTotals.cacheRead).padStart(8)} ${formatTokens(rowTotals.cacheWrite).padStart(8)} ${formatTokens(rowTotals.reasoning).padStart(10)}  ${costLabel(rowTotals)}`;
 				return rowIndex === this.cursor ? this.theme.fg("accent", line) : line;
 			}),
-			...(rows.length > this.pageSize
+			...(rangeLine ? [rangeLine] : []),
+			"",
+			this.theme.fg(
+				"warning",
+				" Reasoning and cache columns are source-native subsets, never add them to Total.",
+			),
+			this.theme.fg(
+				"dim",
+				` ${this.health.map((item) => `${item.source} ${item.status} (${item.files})`).join(" · ")} · Cursor unsupported`,
+			),
+			this.theme.fg("dim", " t today · 7 7d · 3 30d · a all · g grouping"),
+		];
+		const activeRow = rows[this.cursor];
+		const compactContent = [
+			this.theme.fg("accent", this.theme.bold(` Usage · ${this.period} · ${location}`)),
+			` ${formatTokens(totals.total)} total · ${this.number.format(totals.requests)} requests`,
+			"",
+			...visibleRows.map(({ label, totals: rowTotals }, visibleIndex) => {
+				const rowIndex = this.offset + visibleIndex;
+				const marker = rowIndex === this.cursor ? "›" : " ";
+				const line = `${marker} ${label.padEnd(24).slice(0, 24)} ${this.number.format(rowTotals.requests).padStart(7)} req  ${formatTokens(rowTotals.total).padStart(7)}`;
+				return rowIndex === this.cursor ? this.theme.fg("accent", line) : line;
+			}),
+			...(rangeLine ? [rangeLine] : []),
+			"",
+			...(activeRow
 				? [
-						this.theme.fg(
-							"dim",
-							`Rows ${this.offset + 1}-${Math.min(this.offset + this.pageSize, rows.length)} of ${rows.length}`,
-						),
+						this.theme.fg("accent", ` ${activeRow.label}`),
+						` Input ${formatTokens(activeRow.totals.input)} · Output ${formatTokens(activeRow.totals.output)} · Requests ${this.number.format(activeRow.totals.requests)}`,
+						` Cache R ${formatTokens(activeRow.totals.cacheRead)} · Cache W ${formatTokens(activeRow.totals.cacheWrite)} · Reasoning ${formatTokens(activeRow.totals.reasoning)}`,
+						` Cost ${costLabel(activeRow.totals)}`,
 					]
 				: []),
 			"",
-			`Total: ${formatTokens(totals.total)} normalized tokens, ${this.number.format(totals.requests)} requests, ${costLabel(totals)}`,
-			this.theme.fg(
-				"warning",
-				"Reasoning and cache columns are source-native subsets, never add them to Total.",
-			),
-			this.theme.fg(
-				"dim",
-				`Sources: ${this.health
-					.map(
-						(item) =>
-							`${item.source} ${item.status} (${item.files})${item.malformed || item.skipped ? ` [${item.malformed} malformed, ${item.skipped} skipped]` : ""}`,
-					)
-					.join(" · ")} · Cursor unsupported (usage is server-side).`,
-			),
-			this.theme.fg(
-				"dim",
-				"↑↓ select · enter drill down · ← back · g grouping · t/7/3/a period · esc close",
-			),
+			this.theme.fg("dim", " ↑↓ select · Enter drill · ← back · g group · Esc close"),
 		];
-		return lines.map((line) => truncateToWidth(line, width));
+		const content = width < 100 ? compactContent : wideContent;
+		const innerWidth = Math.max(38, width - 2);
+		const framedRow = (line: string) => {
+			const clipped = truncateToWidth(line, innerWidth);
+			return `${this.theme.fg("border", "│")}${clipped}${" ".repeat(Math.max(0, innerWidth - visibleWidth(clipped)))}${this.theme.fg("border", "│")}`;
+		};
+		return [
+			this.theme.fg("border", `╭${"─".repeat(innerWidth)}╮`),
+			...content.map(framedRow),
+			this.theme.fg("border", `╰${"─".repeat(innerWidth)}╯`),
+		];
 	}
 
 	invalidate() {}
@@ -244,17 +273,29 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			await ctx.ui.custom<void>((tui, theme, _keys, done) => {
-				const view = new UsageDashboard(result.events, result.health, period, done, theme);
-				return {
-					render: (width: number) => view.render(width),
-					invalidate: () => view.invalidate(),
-					handleInput: (data: string) => {
-						view.handleInput(data);
-						tui.requestRender();
+			await ctx.ui.custom<void>(
+				(tui, theme, _keys, done) => {
+					const view = new UsageDashboard(result.events, result.health, period, done, theme);
+					return {
+						render: (width: number) => view.render(width),
+						invalidate: () => view.invalidate(),
+						handleInput: (data: string) => {
+							view.handleInput(data);
+							tui.requestRender();
+						},
+					};
+				},
+				{
+					overlay: true,
+					overlayOptions: {
+						anchor: "center",
+						width: "92%",
+						minWidth: 48,
+						maxHeight: "90%",
+						margin: 1,
 					},
-				};
-			});
+				},
+			);
 		},
 	});
 }

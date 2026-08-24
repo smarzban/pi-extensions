@@ -8,7 +8,7 @@ A private, local token-usage dashboard for [Pi](https://github.com/badlogic/pi-m
 pi install npm:@smarzban/pi-usage
 ```
 
-Run `/usage` to scan local session metadata and open today's dashboard. Use `/usage today`, `/usage 7d`, `/usage 30d`, `/usage all`, or `/usage rebuild` for a full local index rebuild followed by today's view. Inside the dashboard, use the arrow keys to select a row, Enter to drill from source to provider to model, and Left Arrow or Backspace to return. Press `g` to cycle unfiltered groupings.
+Run `/usage` to scan local session metadata and open today's centered overlay dashboard. Use `/usage today`, `/usage 7d`, `/usage 30d`, `/usage all`, or `/usage rebuild` for a full local index rebuild followed by today's view. Inside the dashboard, use the arrow keys to select a row, Enter to drill from source to provider to model, and Left Arrow or Backspace to return. Press `g` to cycle unfiltered groupings. Terminals narrower than 100 columns automatically use a compact inspector layout.
 
 ## Data and privacy
 
