@@ -1,0 +1,17 @@
+{
+  "name": "@smarzban/pi-usage",
+  "version": "0.1.0",
+  "description": "Private local token-usage dashboard for Pi, Claude Code, Codex CLI, and Grok Build",
+  "type": "module",
+  "keywords": ["pi-package", "pi-extension", "usage", "tokens", "dashboard"],
+  "author": "Saeed Marzban",
+  "license": "MIT",
+  "repository": {"type":"git","url":"git+https://github.com/smarzban/pi-extensions.git","directory":"packages/pi-usage"},
+  "homepage": "https://github.com/smarzban/pi-extensions/tree/main/packages/pi-usage#readme",
+  "engines": {"node": ">=20.0.0"},
+  "pi": {"extensions":["./index.ts"]},
+  "peerDependencies": {"@earendil-works/pi-coding-agent":"*", "@earendil-works/pi-tui":"*"},
+  "files": ["index.ts", "core.mjs", "README.md", "LICENSE"],
+  "publishConfig": {"access":"public"},
+  "scripts": {"test":"node --test", "prepublishOnly":"node --test"}
+}
