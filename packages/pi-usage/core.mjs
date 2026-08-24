@@ -245,6 +245,7 @@ export async function saveIndex(path,index) { await mkdir(dirname(path),{recursi
 
 export async function importAll(roots, index = emptyIndex(), hooks = {}) {
  const next = structuredClone(index); const health=[];
+ const clearSource = source => { next.events=next.events.filter(event=>event.source!==source); for(const [path,cursor] of Object.entries(next.files)) if(cursor.source===source) delete next.files[path]; if(source==="codex") next.codex={}; };
  for (const [source, root, matcher] of specs(roots)) {
   const rootList = (Array.isArray(root) ? root : [root]).filter(Boolean); if (!rootList.length) { const stale=Object.entries(next.files).filter(([,cursor])=>cursor.source===source); const reconciled=stale.length>0 || next.events.some(event=>event.source===source); next.events=next.events.filter(event=>event.source!==source); for(const [path] of stale) delete next.files[path]; if(source==="codex") next.codex={}; health.push({source,status:"unavailable",files:0,malformed:0,skipped:0,reconciled}); continue; }
   const availableRoots = await Promise.all(rootList.map(async value => { try { return (await stat(value)).isDirectory(); } catch { return false; } }));
@@ -253,14 +254,15 @@ export async function importAll(roots, index = emptyIndex(), hooks = {}) {
   let reconcile = known.some(([path]) => !paths.includes(path));
   for (const path of paths) { try { const info=await stat(path); const cursor=next.files[path]; if (cursor && (info.size < cursor.size || info.mtimeMs < cursor.mtimeMs || info.size === cursor.size && info.mtimeMs !== cursor.mtimeMs || cursor.ino !== undefined && info.ino !== cursor.ino)) reconcile=true; } catch { reconcile=true; } }
   if (reconcile) { next.events=next.events.filter(event=>event.source !== source); for (const [path] of known) delete next.files[path]; if (source === "codex") next.codex={}; }
-  const sourceHealth={source,status:"ok",files:paths.length,malformed:0,skipped:0,reconciled:reconcile}; const candidates=[];
+  const recoveredHere=hooks.recoveredSource===source;
+  const sourceHealth={source,status:"ok",files:paths.length,malformed:0,skipped:recoveredHere?1:0,reconciled:reconcile||recoveredHere}; const candidates=[];
   // Reconciliation resolves links against every currently scanned Pi path, including
   // unchanged files during a warm append. File paths are safe index metadata.
   const piFiles = source === "pi" ? paths.map(path => ({path,lines:[]})) : [];
   for (const path of paths) {
-   let info; try { info=await stat(path); } catch (error) { if (error?.code === "ENOENT") { reconcile=true; sourceHealth.reconciled=true; sourceHealth.skipped++; continue; } throw error; }
+   let info; try { info=await stat(path); } catch (error) { if (error?.code === "ENOENT") { clearSource(source); if(!hooks.retriedAfterVanish) return importAll(roots,next,{...hooks,beforeRead:undefined,retriedAfterVanish:true,recoveredSource:source}); reconcile=true; sourceHealth.reconciled=true; sourceHealth.skipped++; continue; } throw error; }
    const cursor=next.files[path]; if (!reconcile && cursor?.size === info.size && cursor.mtimeMs === info.mtimeMs) continue;
-   let read; try { await hooks.beforeRead?.(path); read=await appendedLines(path,reconcile ? 0 : cursor?.offset || 0,info.size); } catch (error) { if (error?.code === "ENOENT") { reconcile=true; sourceHealth.reconciled=true; sourceHealth.skipped++; continue; } throw error; }
+   let read; try { await hooks.beforeRead?.(path); read=await appendedLines(path,reconcile ? 0 : cursor?.offset || 0,info.size); } catch (error) { if (error?.code === "ENOENT") { clearSource(source); if(!hooks.retriedAfterVanish) return importAll(roots,next,{...hooks,beforeRead:undefined,retriedAfterVanish:true,recoveredSource:source}); reconcile=true; sourceHealth.reconciled=true; sourceHealth.skipped++; continue; } throw error; }
    const {lines,offset,skipped}=read; sourceHealth.skipped+=skipped; const file={path,lines};
    if (source === "pi") candidates.push(...piEvents(file,sourceHealth));
    if (source === "claude") candidates.push(...claudeCandidates(file,sourceHealth));
