@@ -215,7 +215,15 @@ export async function importAll(roots, index = emptyIndex()) {
 
 // Retained for callers with an externally assembled batch.
 export function mergeIndex(index,events) { const map=new Map(index.events.map(event=>[identity(event.source,event.sessionId,event.key),event])); for(const event of events) map.set(identity(event.source,event.sessionId,event.key),event); return {...index,events:[...map.values()]}; }
-export function eventsForPeriod(events,period="all",now=new Date(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone) { const formatter=new Intl.DateTimeFormat("en-CA",{timeZone,year:"numeric",month:"2-digit",day:"2-digit"}); const day=date=>formatter.format(date); const today=day(now), start=new Date(now); if(period!=="all") start.setDate(start.getDate()-(period==="today"?0:period==="7d"?6:29)); const startDay=day(start); return events.filter(event=>period==="all" || day(new Date(event.timestamp))>=startDay && day(new Date(event.timestamp))<=today); }
+export function eventsForPeriod(events,period="all",now=new Date(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone) {
+ const formatter=new Intl.DateTimeFormat("en",{timeZone,year:"numeric",month:"2-digit",day:"2-digit"});
+ const day=date=>{const parts=Object.fromEntries(formatter.formatToParts(date).map(part=>[part.type,part.value])); return `${parts.year}-${parts.month}-${parts.day}`;};
+ const today=day(now);
+ let startDay=today;
+ if (period === "month") startDay=`${today.slice(0,7)}-01`;
+ else if (period !== "all") { const [year,month,date]=today.split("-").map(Number); const start=new Date(Date.UTC(year,month-1,date)); start.setUTCDate(start.getUTCDate()-(period==="today"?0:period==="7d"?6:29)); startDay=start.toISOString().slice(0,10); }
+ return events.filter(event=>period==="all" || day(new Date(event.timestamp))>=startDay && day(new Date(event.timestamp))<=today);
+}
 export function totalsForPeriod(events,period="all",now=new Date(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone) { return eventsForPeriod(events,period,now,timeZone).reduce((total,event)=>{total.requests++; for(const key of TOKEN_KEYS) total[key]+=event[key]; total.cacheWrite5m+=event.cacheWrite5m || 0; total.cacheWrite1h+=event.cacheWrite1h || 0; const cost=(event.costUsd || 0)+(event.costNativeTicks || 0)/1e10; if(event.costBasis === "recorded") { total.recordedCost+=cost; total.recordedCostItems++; } else if(event.costBasis === "estimated") { total.estimatedCost+=cost; total.estimatedCostItems++; } else total.unavailableCost++; return total;},{requests:0,input:0,output:0,cacheRead:0,cacheWrite:0,cacheWrite5m:0,cacheWrite1h:0,reasoning:0,total:0,recordedCost:0,recordedCostItems:0,estimatedCost:0,estimatedCostItems:0,unavailableCost:0}); }
 export function estimateModelCost(usages,model) {
  const base=model?.cost;

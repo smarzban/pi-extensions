@@ -90,7 +90,10 @@ test("truncation and deleted files reconcile the index, malformed timestamps are
   await truncate(two,0); result=await importAll({pi},result.index); assert.equal(result.events.length,1); assert.equal(result.health[0].reconciled,true);
   const invalid=line({type:"message",id:"bad",timestamp:"not-a-date",message:{role:"assistant",usage:piUsage}}); await writeFile(one,`\n${invalid}\n`,{flag:"a"}); result=await importAll({pi},result.index); assert.equal(result.events.length,1); assert.equal(result.health[0].status,"partial");
   const event={...result.events[0],timestamp:Date.parse("2026-08-15T23:30:00.000Z")};
+  const monthStart={...event,key:"month-start",timestamp:Date.parse("2026-08-01T19:00:00.000Z")};
+  const previousMonth={...event,key:"previous-month",timestamp:Date.parse("2026-08-01T06:00:00.000Z")};
   const old={...event,key:"old",timestamp:Date.parse("2026-07-15T23:30:00.000Z")};
   assert.equal(totalsForPeriod([event,old],"today",new Date("2026-08-16T01:00:00Z"),"America/Los_Angeles").requests,1);
+  assert.equal(totalsForPeriod([event,monthStart,previousMonth],"month",new Date("2026-08-16T01:00:00Z"),"America/Los_Angeles").requests,2);
  } finally { await rm(root,{recursive:true,force:true}); }
 });

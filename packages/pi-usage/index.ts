@@ -11,7 +11,7 @@ import {
 	totalsForPeriod,
 } from "./core.mjs";
 
-type Period = "today" | "7d" | "30d" | "all";
+type Period = "today" | "7d" | "30d" | "month" | "all";
 type Group = "source" | "provider" | "model";
 
 interface UsageEvent {
@@ -257,8 +257,23 @@ class UsageDashboard {
 			this.usageOffset = this.offset;
 			this.screen = "estimate-provider";
 			this.resetCursor();
-		} else if (data === "t" || data === "7" || data === "3" || data === "a") {
-			this.period = data === "t" ? "today" : data === "7" ? "7d" : data === "3" ? "30d" : "all";
+		} else if (
+			data === "t" ||
+			data === "7" ||
+			data === "3" ||
+			data === "m" ||
+			data === "a"
+		) {
+			this.period =
+				data === "t"
+					? "today"
+					: data === "7"
+						? "7d"
+						: data === "3"
+							? "30d"
+							: data === "m"
+								? "month"
+								: "all";
 			this.resetCursor();
 		} else if (data === "o") {
 			this.filters = {};
@@ -330,11 +345,13 @@ class UsageDashboard {
 			`${this.theme.fg("dim", label)} ${this.theme.fg("accent", this.theme.bold(value))}`;
 		const wideContent = [
 			this.theme.fg("accent", this.theme.bold(` Usage · ${this.period} · ${location}`)),
+			"",
 			this.theme.fg("dim", " ↑↓ select   Enter drill down   e estimate   Esc close"),
 			"",
 			` ${stat("TOTAL", formatTokens(totals.total))}     ${stat("REQUESTS", this.number.format(totals.requests))}     ${stat("API EQ", costLabel(totals))}     ${stat("CACHE READ", formatTokens(totals.cacheRead))}`,
 			...(this.estimateTarget && paygLabel
 				? [
+						"",
 						` ${stat("EST PAYG", paygLabel)}     ${this.theme.fg("dim", `${this.estimateTarget.provider} / ${this.estimateTarget.name} · current catalog rates · recorded cache mix`)}`,
 					]
 				: []),
@@ -353,7 +370,7 @@ class UsageDashboard {
 			"",
 			this.theme.fg(
 				"dim",
-				" t today · 7 7d · 3 30d · a all time · o other sources · e estimate",
+				" t today · 7 7d · 3 30d · m month · a all time · o other sources · e estimate",
 			),
 		];
 		const activeRow = rows[this.cursor];
@@ -362,6 +379,7 @@ class UsageDashboard {
 			` ${formatTokens(totals.total)} total · ${this.number.format(totals.requests)} requests`,
 			...(this.estimateTarget && paygLabel
 				? [
+						"",
 						` ${this.theme.fg("accent", `Est PAYG ${paygLabel}`)} · ${this.estimateTarget.provider}/${this.estimateTarget.name}`,
 					]
 				: []),
@@ -397,14 +415,14 @@ class UsageDashboard {
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("usage", {
-		description: "Local usage dashboard. Args: today, 7d, 30d, all, rebuild",
+		description: "Local usage dashboard. Args: today, 7d, 30d, month, all, rebuild",
 		handler: async (args, ctx) => {
 			const requested = (args ?? "").trim().toLowerCase();
-			if (!["", "today", "7d", "30d", "all", "rebuild"].includes(requested)) {
-				ctx.ui.notify("Usage: /usage [today|7d|30d|all|rebuild]", "error");
+			if (!["", "today", "7d", "30d", "month", "all", "rebuild"].includes(requested)) {
+				ctx.ui.notify("Usage: /usage [today|7d|30d|month|all|rebuild]", "error");
 				return;
 			}
-			const period: Period = (["today", "7d", "30d", "all"] as string[]).includes(requested)
+			const period: Period = (["today", "7d", "30d", "month", "all"] as string[]).includes(requested)
 				? (requested as Period)
 				: "today";
 			const indexPath = join(getAgentDir(), "pi-usage", "index.json");
