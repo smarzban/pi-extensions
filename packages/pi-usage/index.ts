@@ -42,8 +42,9 @@ const costLabel = (totals: {
 
 class UsageDashboard {
 	private period: Period;
-	private group: Group = "source";
-	private filters: { source?: string; provider?: string } = {};
+	private group: Group = "provider";
+	private filters: { source?: string; provider?: string } = { source: "pi" };
+	private sourcePickerActive = false;
 	private cursor = 0;
 	private offset = 0;
 	private rowLabels: string[] = [];
@@ -84,7 +85,11 @@ class UsageDashboard {
 			delete this.filters.provider;
 			this.group = "provider";
 			this.resetCursor();
-		} else if (this.group === "provider" && this.filters.source) {
+		} else if (
+			this.group === "provider" &&
+			this.filters.source &&
+			this.sourcePickerActive
+		) {
 			this.filters = {};
 			this.group = "source";
 			this.resetCursor();
@@ -97,10 +102,10 @@ class UsageDashboard {
 		} else if (data === "t" || data === "7" || data === "3" || data === "a") {
 			this.period = data === "t" ? "today" : data === "7" ? "7d" : data === "3" ? "30d" : "all";
 			this.resetCursor();
-		} else if (data === "g") {
+		} else if (data === "o") {
 			this.filters = {};
-			this.group =
-				this.group === "source" ? "provider" : this.group === "provider" ? "model" : "source";
+			this.sourcePickerActive = true;
+			this.group = "source";
 			this.resetCursor();
 		} else if (matchesKey(data, Key.enter)) {
 			this.drillDown();
@@ -176,7 +181,10 @@ class UsageDashboard {
 			}),
 			...(rangeLine ? [rangeLine] : []),
 			"",
-			this.theme.fg("dim", " t today · 7 7d · 3 30d · a all time · g grouping"),
+			this.theme.fg(
+				"dim",
+				" t today · 7 7d · 3 30d · a all time · o other sources",
+			),
 		];
 		const activeRow = rows[this.cursor];
 		const compactContent = [
@@ -200,7 +208,10 @@ class UsageDashboard {
 					]
 				: []),
 			"",
-			this.theme.fg("dim", " ↑↓ select · Enter drill · ← back · g group · Esc close"),
+			this.theme.fg(
+				"dim",
+				" ↑↓ select · Enter drill · ← back · o other sources · Esc close",
+			),
 		];
 		const content = width < 100 ? compactContent : wideContent;
 		const innerWidth = Math.max(38, width - 2);
