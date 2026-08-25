@@ -301,6 +301,7 @@ export function pricingModelsFromRegistry(models) {
  for(const model of models || []) { const cost=model?.cost; if(!complete(cost) || !(cost.tiers||[]).every(complete) || ![cost.input,cost.output,cost.cacheRead,cost.cacheWrite].some(rate=>rate>0)) continue; const provider=sanitizeLabel(model.provider), id=sanitizeLabel(model.id); if (!result.has(`${provider}/${id}`)) result.set(`${provider}/${id}`,{provider,id,name:sanitizeLabel(model.name || model.id),cost:{...cost,tiers:cost.tiers?.map(tier=>({...tier}))}}); }
  return [...result.values()];
 }
+export const dashboardInputs = (events,modelRegistry) => ({events,pricingModels:pricingModelsFromRegistry(modelRegistry.getAll())});
 export function estimateModelCost(usages,model) {
  const base=model?.cost;
  if (!base) return undefined;

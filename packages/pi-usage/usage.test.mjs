@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, readFile, rm, stat, truncate, writeFile } from "node:fs
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { collectLines, estimateModelCost, eventsForPeriod, filterEvents, importAll, loadIndex, MAX_JSONL_LINE_BYTES, pricingModelsFromRegistry, sanitizeFilterInput, sanitizeLabel, saveIndex, scanJsonlChunks, sourceRoots, totalsForPeriod } from "./core.mjs";
+import { collectLines, dashboardInputs, estimateModelCost, eventsForPeriod, filterEvents, importAll, loadIndex, MAX_JSONL_LINE_BYTES, pricingModelsFromRegistry, sanitizeFilterInput, sanitizeLabel, saveIndex, scanJsonlChunks, sourceRoots, totalsForPeriod } from "./core.mjs";
 import { bucketEvents, compressBuckets, renderBrailleGraph } from "./graph.mjs";
 
 const iso = "2026-08-15T12:00:00.000Z";
@@ -168,10 +168,11 @@ test("bounded JSONL scanner and terminal input sanitizers handle oversized and e
  assert.equal(sanitizeFilterInput("\x1b[A"),""); assert.equal(sanitizeFilterInput("\x1b[200~qwen max\x1b[201~"),"qwen max"); assert.equal(sanitizeFilterInput(" ")," ");
 });
 
-test("registry pricing mapping keeps complete tiers without credentials and excludes unusable models", () => {
- const models=pricingModelsFromRegistry([{provider:"p",id:"a",name:"A",cost:{input:1,output:2,cacheRead:.1,cacheWrite:1,tiers:[{inputTokensAbove:10,input:2,output:3,cacheRead:.2,cacheWrite:2}]}},{provider:"p",id:"a",name:"duplicate",cost:{input:1,output:2,cacheRead:.1,cacheWrite:1}},{provider:"p",id:"bad",cost:{input:1,output:2,cacheRead:.1,cacheWrite:1,tiers:[{inputTokensAbove:1,input:2}]}},{provider:"p",id:"zero",cost:{input:0,output:0,cacheRead:0,cacheWrite:0}}]);
- assert.equal(models.length,1); assert.equal(models[0].cost.tiers.length,1); assert.equal(models[0].name,"A");
- assert.deepEqual(sourceRoots("/home/user","/agent"),{pi:join("/agent","sessions"),claude:join("/home/user",".claude","projects"),codex:[join("/home/user",".codex","sessions"),join("/home/user",".codex","archived_sessions")],grok:join("/home/user",".grok","sessions")});
+test("registry pricing conversion is handed to dashboard inputs with complete tier data", () => {
+ const catalog=[{provider:"p",id:"a",name:"A",cost:{input:1,output:2,cacheRead:.1,cacheWrite:1,tiers:[{inputTokensAbove:10,input:2,output:3,cacheRead:.2,cacheWrite:2}]}},{provider:"p",id:"a",name:"duplicate",cost:{input:1,output:2,cacheRead:.1,cacheWrite:1}},{provider:"p",id:"bad",cost:{input:1,output:2,cacheRead:.1,cacheWrite:1,tiers:[{inputTokensAbove:1,input:2}]}},{provider:"p",id:"zero",cost:{input:0,output:0,cacheRead:0,cacheWrite:0}}];
+ const events=[{input:1,output:1,cacheRead:0,cacheWrite:0}], registry={getAllCalls:0,getAll(){this.getAllCalls++;return catalog;}};
+ const dashboard=dashboardInputs(events,registry); assert.equal(registry.getAllCalls,1); assert.equal(dashboard.events,events); assert.equal(dashboard.pricingModels.length,1); assert.equal(dashboard.pricingModels[0].cost.tiers.length,1); assert.equal(dashboard.pricingModels[0].name,"A"); assert.ok(estimateModelCost(dashboard.events,dashboard.pricingModels[0])>0);
+ assert.equal(pricingModelsFromRegistry(catalog).length,1); assert.deepEqual(sourceRoots("/home/user","/agent"),{pi:join("/agent","sessions"),claude:join("/home/user",".claude","projects"),codex:[join("/home/user",".codex","sessions"),join("/home/user",".codex","archived_sessions")],grok:join("/home/user",".grok","sessions")});
 });
 
 test("Codex and Grok sentinels never survive persisted imports", async () => {
@@ -204,7 +205,7 @@ test("the packaged entrypoint registers and runs /usage against an isolated agen
 test("cost classification, exact rolling boundaries, private saves, and absent roots reconcile", async () => {
  const now=new Date("2026-08-16T12:00:00Z"), event=(day,costBasis="unavailable",costUsd)=>({source:"pi",provider:"p",model:"m",key:day,timestamp:Date.parse(`${day}T12:00:00Z`),input:0,output:0,cacheRead:0,cacheWrite:0,total:0,costBasis,...(costUsd===undefined?{}:{costUsd})});
  const events=[event("2026-08-10"),event("2026-08-09"),event("2026-07-18"),event("2026-07-17"),event("2026-08-16","recorded",0),event("2026-08-16","estimated",2),{...event("2026-08-16","recorded"),key:"ticks",costNativeTicks:1_000_000_000}];
- assert.equal(eventsForPeriod(events,"7d",now,"UTC").length,4); assert.equal(eventsForPeriod(events,"30d",now,"UTC").length,6); const totals=totalsForPeriod(events); assert.equal(totals.recordedCostItems,2); assert.equal(totals.recordedCost,.1); assert.equal(totals.estimatedCostItems,1); assert.equal(totals.unavailableCost,4);
+ assert.equal(eventsForPeriod(events,"7d",now,"UTC").length,4); assert.equal(eventsForPeriod(events,"30d",now,"UTC").length,6); assert.equal(totalsForPeriod(events,"7d",now,"UTC").requests,4); assert.equal(totalsForPeriod(events,"30d",now,"UTC").requests,6); const totals=totalsForPeriod(events); assert.equal(totals.recordedCostItems,2); assert.equal(totals.recordedCost,.1); assert.equal(totals.estimatedCostItems,1); assert.equal(totals.unavailableCost,4);
  const piWithoutCost=collectLines("pi",[{path:"/pi.jsonl",lines:[line({type:"message",id:"no-cost",timestamp:iso,message:{role:"assistant",usage:{input:1,output:1,totalTokens:2}}})]}]); assert.equal(piWithoutCost[0].costBasis,"unavailable");
  const grokWithoutCost=collectLines("grok",[{path:"/grok/s/updates.jsonl",lines:[line({timestamp:1786816800,params:{sessionId:"s",update:{sessionUpdate:"turn_completed",prompt_id:"p",usage:{inputTokens:1,outputTokens:1,totalTokens:2}}}})]}]); assert.equal(grokWithoutCost[0].costBasis,"unavailable");
  const root=await fixture(); try { const indexPath=join(root,"private","index.json"); await Promise.all([saveIndex(indexPath,{version:7,events:[],files:{},codex:{}}),saveIndex(indexPath,{version:7,events:[],files:{},codex:{}})]); assert.equal((await stat(indexPath)).mode & 0o777,0o600); assert.equal((await stat(join(root,"private"))).mode & 0o777,0o700); let result=await importAll({pi:join(root,"gone")},{version:7,events:[event("2026-08-16")],files:{[join(root,"gone","x")]:{source:"pi"}},codex:{}}); assert.equal(result.events.length,0); assert.equal(result.health[0].reconciled,true); } finally { await rm(root,{recursive:true,force:true}); }

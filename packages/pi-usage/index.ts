@@ -10,7 +10,7 @@ import {
 	saveIndex,
 	totalsForPeriod,
 	filterEvents,
-	pricingModelsFromRegistry,
+	dashboardInputs,
 	sanitizeFilterInput,
 	sanitizeLabel,
 	sourceRoots,
@@ -507,11 +507,11 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			const pricingModels = pricingModelsFromRegistry(ctx.modelRegistry.getAll()) as PricingModel[];
+			const dashboard = dashboardInputs(result.events, ctx.modelRegistry) as { events: UsageEvent[]; pricingModels: PricingModel[] };
 
 			await ctx.ui.custom<void>(
 				(tui, theme, _keys, done) => {
-					const view = new UsageDashboard(result.events, pricingModels, period, done, theme, () => tui.terminal.rows);
+					const view = new UsageDashboard(dashboard.events, dashboard.pricingModels, period, done, theme, () => tui.terminal.rows);
 					return {
 						render: (width: number) => view.render(width),
 						invalidate: () => view.invalidate(),
