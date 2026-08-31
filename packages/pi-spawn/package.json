@@ -1,0 +1,43 @@
+{
+	"name": "@smarzban/pi-spawn",
+	"version": "0.1.0",
+	"description": "Fan out a confirmed brief to named Pi agents in parallel, then collect findings",
+	"type": "module",
+	"keywords": ["pi-package", "pi-extension", "spawn", "herdr", "parallel"],
+	"author": "Saeed Marzban",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/smarzban/pi-extensions.git",
+		"directory": "packages/pi-spawn"
+	},
+	"homepage": "https://github.com/smarzban/pi-extensions/tree/main/packages/pi-spawn#readme",
+	"engines": {
+		"node": ">=20.0.0"
+	},
+	"pi": {
+		"extensions": ["./index.ts"],
+		"skills": ["./skills"]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*",
+		"typebox": "*"
+	},
+	"files": [
+		"index.ts",
+		"core.mjs",
+		"install.mjs",
+		"runners.mjs",
+		"skills",
+		"README.md",
+		"LICENSE"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"test": "node --test",
+		"prepublishOnly": "node --test"
+	}
+}

@@ -14,7 +14,8 @@
 			"./packages/pi-statusline",
 			"./packages/pi-toolview",
 			"./packages/pi-editor",
-			"./packages/pi-usage"
+			"./packages/pi-usage",
+			"./packages/pi-spawn"
 		],
 		"themes": [
 			"./themes"
