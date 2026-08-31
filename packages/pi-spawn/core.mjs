@@ -1,13 +1,13 @@
-import { readFile, mkdir, rm, lstat } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rm, lstat, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const MAX_FINDING_BYTES = 1_000_000;
 
 /**
  * @typedef {{ name: string, model: string, thinking: string }} NamedAgent
- * @typedef {{ agents: Record<string, { model: string, thinking?: string }>, defaultSet: string[], timeoutMs: number }} SpawnConfig
+ * @typedef {{ agents: Record<string, { model: string, thinking?: string }>, defaultSet: string[], timeoutMs: number | null }} SpawnConfig
  */
 
 /**
@@ -72,12 +72,17 @@ export function validateSpawnConfig(value) {
 		}
 	}
 
-	const timeoutMs = value.timeoutMs ?? 300_000;
-	if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-		throw new Error("spawn.json.timeoutMs must be a positive number");
+	// null / omitted = wait until every child finishes or the user cancels (no guessed duration).
+	// A positive number is only a safety ceiling for hung children.
+	let timeoutMs = null;
+	if (value.timeoutMs !== undefined && value.timeoutMs !== null) {
+		if (!Number.isFinite(value.timeoutMs) || value.timeoutMs <= 0) {
+			throw new Error("spawn.json.timeoutMs must be a positive number, or null to wait until done");
+		}
+		timeoutMs = Number(value.timeoutMs);
 	}
 
-	return { agents, defaultSet: [...defaultSet], timeoutMs: Number(timeoutMs) };
+	return { agents, defaultSet: [...defaultSet], timeoutMs };
 }
 
 /**
@@ -161,6 +166,17 @@ export function parseSpawnArgs(args = "") {
 		};
 	}
 
+	if (/^status$/i.test(rest)) {
+		return {
+			form: "status",
+			asksForTopic: false,
+			useDefaultSet: false,
+			background: false,
+			names: undefined,
+			topic: undefined,
+		};
+	}
+
 	const namedOnThis = /^(\S+)\s+on\s+this$/i;
 	const namedMatch = rest.match(namedOnThis);
 	if (namedMatch) {
@@ -179,7 +195,7 @@ export function parseSpawnArgs(args = "") {
 	}
 
 	throw new Error(
-		`unrecognized /spawn args: ${rest} (try /spawn, /spawn <name> on this, /spawn the agents on this)`,
+		`unrecognized /spawn args: ${rest} (try /spawn, /spawn <name> on this, /spawn the agents on this, /spawn status)`,
 	);
 }
 
@@ -213,30 +229,20 @@ export function chooseRuntime(input = {}) {
 
 /**
  * Build the prompt that tells a child to answer the brief and write a finding file.
- * When parentPaneId is set, the child is told to ping the parent pane once done.
- * @param {{ brief: string, findingPath: string, agentName: string, parentPaneId?: string }} input
+ * @param {{ brief: string, findingPath: string, agentName: string }} input
  */
-export function buildFindingPrompt({ brief, findingPath, agentName, parentPaneId }) {
-	const lines = [
+export function buildFindingPrompt({ brief, findingPath, agentName }) {
+	return [
 		`You are spawned agent "${agentName}" working the same confirmed brief as sibling agents.`,
 		"Answer the brief thoroughly using your normal Pi tools.",
 		"When finished, write your complete finding as Markdown to this exact path (overwrite if needed):",
 		findingPath,
 		"Prefer writing to a sibling temp file then renaming onto that path so the file appears atomically.",
-	];
-	if (parentPaneId) {
-		lines.push(
-			"After the finding file is written, ping the parent pane so it knows you are done by running exactly:",
-			`herdr agent prompt ${parentPaneId} "spawn-ping: ${agentName} done, finding at ${findingPath}"`,
-		);
-	}
-	lines.push(
-		"Do not ask the parent for confirmation. Do not spawn further agents.",
+		"Do not ask the parent for confirmation. Do not spawn further agents. Do not message the parent pane.",
 		"",
 		"## Confirmed brief",
 		brief,
-	);
-	return lines.join("\n");
+	].join("\n");
 }
 
 /**
@@ -260,12 +266,11 @@ export function sanitizeHerdrAgentName(name) {
  *   brief: string,
  *   findingPath: string,
  *   runtime: "herdr" | "headless",
- *   timeoutMs: number,
- *   parentPaneId?: string,
+ *   timeoutMs: number | null,
  * }} input
  */
 export function buildChildLaunch(input) {
-	const { agent, cwd, brief, findingPath, runtime, timeoutMs, parentPaneId } = input;
+	const { agent, cwd, brief, findingPath, runtime, timeoutMs } = input;
 	if (!agent?.name || !agent?.model) throw new Error("buildChildLaunch requires agent name and model");
 	if (!cwd) throw new Error("buildChildLaunch requires cwd");
 	if (!brief?.trim()) throw new Error("buildChildLaunch requires brief");
@@ -273,16 +278,14 @@ export function buildChildLaunch(input) {
 	if (runtime !== "herdr" && runtime !== "headless") {
 		throw new Error(`unknown runtime: ${runtime}`);
 	}
-	if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-		throw new Error("buildChildLaunch requires positive timeoutMs");
+	if (timeoutMs != null && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
+		throw new Error("buildChildLaunch timeoutMs must be null or a positive number");
 	}
 
 	const prompt = buildFindingPrompt({
 		brief: brief.trim(),
 		findingPath,
 		agentName: agent.name,
-		// Ping only makes sense for herdr children: headless children are killed at timeout.
-		parentPaneId: runtime === "herdr" ? parentPaneId : undefined,
 	});
 
 	const modelArgs = ["--model", agent.model, "--thinking", agent.thinking ?? "off"];
@@ -343,8 +346,21 @@ export function findingPathFor(runDir, agentName) {
 }
 
 function sleep(ms, deps = {}) {
-	const wait = deps.sleep ?? ((n) => new Promise((resolve) => setTimeout(resolve, n)));
-	return wait(ms);
+	if (deps.signal?.aborted) {
+		return Promise.reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+	}
+	if (deps.sleep) return Promise.resolve(deps.sleep(ms));
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			deps.signal?.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		const onAbort = () => {
+			clearTimeout(timer);
+			reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+		};
+		deps.signal?.addEventListener("abort", onAbort, { once: true });
+	});
 }
 
 /**
@@ -393,12 +409,12 @@ export async function readFindingFile(path, deps = {}) {
 }
 
 /**
- * Wait until timeout (or all findings present / settled without findings).
- * Children may still be running; call collect concurrently with starters.
+ * Wait until every agent is settled (or safety timeout / cancel).
+ * Children may still be running when timed out; call after or alongside starters.
  * @param {{
  *   runDir: string,
  *   agents: Array<{ name: string, findingPath: string }>,
- *   timeoutMs: number,
+ *   timeoutMs?: number | null,
  *   pollMs?: number,
  *   isSettled?: (name: string) => boolean,
  *   settledReason?: (name: string) => string | undefined,
@@ -411,7 +427,7 @@ export async function awaitAndCollect(input) {
 	const {
 		runDir,
 		agents,
-		timeoutMs,
+		timeoutMs = null,
 		pollMs = 250,
 		isSettled,
 		settledReason,
@@ -422,8 +438,8 @@ export async function awaitAndCollect(input) {
 	if (!Array.isArray(agents) || agents.length === 0) {
 		throw new Error("awaitAndCollect requires agents");
 	}
-	if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-		throw new Error("awaitAndCollect requires positive timeoutMs");
+	if (timeoutMs != null && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
+		throw new Error("awaitAndCollect timeoutMs must be null or a positive number");
 	}
 
 	const started = now();
@@ -432,8 +448,9 @@ export async function awaitAndCollect(input) {
 	const findings = [];
 	/** @type {Array<{ agentName: string, findingPath: string, reason: string }>} */
 	const missing = [];
+	const hasDeadline = timeoutMs != null;
 
-	while (pending.size > 0 && now() - started < timeoutMs) {
+	while (pending.size > 0 && (!hasDeadline || now() - started < timeoutMs)) {
 		for (const [name, agent] of [...pending.entries()]) {
 			const settled = Boolean(isSettled?.(name));
 			// When an isSettled hook is provided, never accept a finding until the
@@ -466,9 +483,9 @@ export async function awaitAndCollect(input) {
 			}
 		}
 		if (pending.size === 0) break;
-		const remaining = timeoutMs - (now() - started);
-		if (remaining <= 0) break;
-		await sleep(Math.min(pollMs, remaining), input);
+		const waitMs = hasDeadline ? Math.min(pollMs, timeoutMs - (now() - started)) : pollMs;
+		if (waitMs <= 0) break;
+		await sleep(waitMs, input);
 	}
 
 	// Final pass so findings written during the last sleep are not missed.
@@ -507,7 +524,7 @@ export async function awaitAndCollect(input) {
 		missing.push({
 			agentName: agent.name,
 			findingPath: agent.findingPath,
-			reason: "timeout",
+			reason: hasDeadline ? "timeout" : "still-running",
 		});
 	}
 
@@ -546,6 +563,7 @@ export function formatSpawnResult(result) {
 	parts.push(`Spawn runtime: ${result.runtime}`);
 	parts.push(`Elapsed: ${Math.round(result.elapsedMs)}ms`);
 	parts.push(`Timed out: ${result.timedOut ? "yes" : "no"}`);
+	parts.push(`Wait mode: ${result.timeoutMs == null ? "until all finish (or cancel)" : `safety ceiling ${result.timeoutMs}ms`}`);
 	parts.push("");
 	parts.push("## Findings");
 	if (!result.findings?.length) {
@@ -571,7 +589,7 @@ export function formatSpawnResult(result) {
 		);
 		if (result.runDirKept) {
 			parts.push(
-				`The run dir was kept: still-running agents may land findings there later (a "spawn-ping: <agent> done" message may arrive). Read the finding file then and fold it into the report.`,
+				`The run dir was kept at ${result.runDir}. Late findings may still land there. Use /spawn status (or ask to check the run) to pick them up; children do not ping the parent chat.`,
 			);
 		}
 	}
@@ -620,7 +638,6 @@ export function planSpawnRun(input) {
 			findingPath: findingPathFor(runDir, agent.name),
 			runtime,
 			timeoutMs: input.config.timeoutMs,
-			parentPaneId: input.parentPaneId,
 		}),
 	);
 	return {
@@ -635,24 +652,29 @@ export function planSpawnRun(input) {
 }
 
 /**
- * Create the run dir, start children via injectable runners, collect concurrently with timeout, cleanup.
+ * Create the run dir, start children, wait until all finish (or safety timeout / cancel), collect, cleanup.
  * @param {ReturnType<typeof planSpawnRun>} plan
  * @param {{
  *   mkdir?: typeof import("node:fs/promises").mkdir,
+ *   writeFile?: typeof import("node:fs/promises").writeFile,
  *   awaitAndCollect?: typeof awaitAndCollect,
  *   cleanupRunDir?: typeof cleanupRunDir,
- *   runHeadless?: (launch: object, opts: { timeoutMs: number, signal?: AbortSignal }) => Promise<unknown>,
- *   runHerdr?: (launch: object, opts: { timeoutMs: number, signal?: AbortSignal, onStarted?: (info: object) => void }) => Promise<unknown>,
+ *   runHeadless?: (launch: object, opts: { timeoutMs?: number | null, signal?: AbortSignal }) => Promise<unknown>,
+ *   runHerdr?: (launch: object, opts: { timeoutMs?: number | null, signal?: AbortSignal, onStarted?: (info: object) => void }) => Promise<unknown>,
  *   signal?: AbortSignal,
+ *   now?: () => number,
+ *   sleep?: (ms: number) => Promise<void>,
  * }} [deps]
  */
 export async function executeSpawnRun(plan, deps = {}) {
 	const collect = deps.awaitAndCollect ?? awaitAndCollect;
 	const cleanup = deps.cleanupRunDir ?? cleanupRunDir;
 	const makeDir = deps.mkdir ?? mkdir;
+	const write = deps.writeFile ?? writeFile;
 	const runHeadless = deps.runHeadless;
 	const runHerdr = deps.runHerdr;
 	const outerSignal = deps.signal;
+	const now = deps.now ?? Date.now;
 
 	await makeDir(plan.runDir, { recursive: true, mode: 0o700 });
 
@@ -660,7 +682,7 @@ export async function executeSpawnRun(plan, deps = {}) {
 	const settled = new Map();
 	/** @type {Array<{ agentName: string, error: string }>} */
 	const startErrors = [];
-	/** @type {Map<string, { paneId?: string, tabId?: string }>} */
+	/** @type {Map<string, { paneId?: string, tabId?: string, running?: boolean, agent?: string, attempts?: number }>} */
 	const panes = new Map();
 
 	const ac = new AbortController();
@@ -670,11 +692,26 @@ export async function executeSpawnRun(plan, deps = {}) {
 		else outerSignal.addEventListener("abort", onOuterAbort, { once: true });
 	}
 	const runnerOpts = { timeoutMs: plan.timeoutMs, signal: ac.signal };
+	const startedAt = new Date(now()).toISOString();
+
+	await writeRunManifest(plan, {
+		status: "running",
+		startedAt,
+		finishedAt: null,
+		panes,
+		writeFile: write,
+	});
 
 	const starters = plan.launches.map(async (launch) => {
 		const opts = {
 			...runnerOpts,
 			onStarted: (info) => panes.set(launch.agentName, { ...info }),
+			onAgentRunning: (info) =>
+				panes.set(launch.agentName, {
+					...(panes.get(launch.agentName) ?? {}),
+					...info,
+					running: true,
+				}),
 		};
 		try {
 			if (launch.runtime === "herdr") {
@@ -688,33 +725,74 @@ export async function executeSpawnRun(plan, deps = {}) {
 			return { agentName: launch.agentName, ok: true };
 		} catch (err) {
 			const error = String(err?.message || err);
-			settled.set(launch.agentName, { error });
-			startErrors.push({ agentName: launch.agentName, error });
-			return { agentName: launch.agentName, ok: false, error };
+			const aborted = isAbortLikeError(err);
+			settled.set(launch.agentName, { error, aborted });
+			// Abort from safety ceiling / tool cancel is not a start failure.
+			if (!aborted) startErrors.push({ agentName: launch.agentName, error });
+			return { agentName: launch.agentName, ok: false, error, aborted };
 		}
 	});
 	// Attach immediately so early runner rejections are not unhandled.
 	const startersSettled = Promise.allSettled(starters);
+
+	const waitStarted = now();
+	let hitSafetyTimeout = false;
+	const safetyAc = new AbortController();
+	try {
+		if (plan.timeoutMs == null) {
+			await startersSettled;
+		} else {
+			const safety = sleep(plan.timeoutMs, { sleep: deps.sleep, signal: safetyAc.signal })
+				.then(() => {
+					hitSafetyTimeout = true;
+					ac.abort();
+					return "timeout";
+				})
+				.catch((err) => {
+					if (err?.name === "AbortError") return "cancelled";
+					throw err;
+				});
+			await Promise.race([startersSettled.then(() => "done"), safety]);
+			await startersSettled;
+		}
+	} finally {
+		safetyAc.abort();
+		if (outerSignal) outerSignal.removeEventListener("abort", onOuterAbort);
+		if (!ac.signal.aborted) ac.abort();
+	}
 
 	let collected;
 	try {
 		collected = await collect({
 			runDir: plan.runDir,
 			agents: plan.launches.map((l) => ({ name: l.agentName, findingPath: l.findingPath })),
-			timeoutMs: plan.timeoutMs,
+			// All starters have settled (or were aborted). Collect once.
+			timeoutMs: 1,
 			isSettled: (name) => settled.has(name),
 			settledReason: (name) => {
 				const entry = settled.get(name);
-				if (!entry) return undefined;
+				if (!entry) return hitSafetyTimeout ? "timeout" : "still-running";
+				if (entry.aborted) return hitSafetyTimeout ? "timeout" : "cancelled";
 				return entry.error ? `start-error: ${entry.error}` : "no-finding";
 			},
+			now,
+			sleep: deps.sleep,
 		});
+		if (hitSafetyTimeout) collected = { ...collected, timedOut: true };
+		collected = { ...collected, elapsedMs: now() - waitStarted };
 	} finally {
-		ac.abort();
-		if (outerSignal) outerSignal.removeEventListener("abort", onOuterAbort);
-		await startersSettled;
+		const finishedAt = new Date(now()).toISOString();
+		await writeRunManifest(plan, {
+			status: collectedCleanly(collected) ? "complete" : "partial",
+			startedAt,
+			finishedAt,
+			panes,
+			findings: collected?.findings ?? [],
+			missing: collected?.missing ?? [],
+			writeFile: write,
+		}).catch(() => {});
 		// Keep the run dir when agents are still outstanding (or collect failed):
-		// herdr stragglers stay alive in their tabs and may still write findings.
+		// herdr children stay alive in their tabs and may still write findings.
 		if (collectedCleanly(collected)) await cleanup(plan.runDir);
 	}
 
@@ -723,6 +801,7 @@ export async function executeSpawnRun(plan, deps = {}) {
 		runtime: plan.runtime,
 		runDir: plan.runDir,
 		runDirKept: !collectedCleanly(collected),
+		timeoutMs: plan.timeoutMs,
 		findings: collected.findings,
 		missing: collected.missing,
 		timedOut: collected.timedOut,
@@ -734,4 +813,138 @@ export async function executeSpawnRun(plan, deps = {}) {
 
 function collectedCleanly(collected) {
 	return Boolean(collected) && collected.missing.length === 0;
+}
+
+/** AbortController / runner abort — not a start failure. */
+function isAbortLikeError(err) {
+	if (!err) return false;
+	if (err.name === "AbortError") return true;
+	// Injectable test runners may reject with a bare message.
+	return String(err.message || err).trim() === "aborted";
+}
+
+export function manifestPathFor(runDir) {
+	return join(runDir, "manifest.json");
+}
+
+async function writeRunManifest(plan, opts) {
+	const write = opts.writeFile ?? writeFile;
+	const paneFor = opts.panes ?? new Map();
+	const delivered = new Set((opts.findings ?? []).map((f) => f.agentName));
+	const missingFor = new Map((opts.missing ?? []).map((m) => [m.agentName, m.reason]));
+	const agents = plan.launches.map((launch) => {
+		const pane = paneFor.get(launch.agentName) ?? {};
+		let status = "pending";
+		if (delivered.has(launch.agentName)) status = "delivered";
+		else if (missingFor.has(launch.agentName)) status = "missing";
+		else if (opts.status === "running") status = "running";
+		return {
+			name: launch.agentName,
+			findingPath: launch.findingPath,
+			paneId: pane.paneId ?? null,
+			tabId: pane.tabId ?? null,
+			status,
+			reason: missingFor.get(launch.agentName) ?? null,
+		};
+	});
+	const manifest = {
+		runId: plan.runId,
+		brief: plan.brief,
+		runtime: plan.runtime,
+		runDir: plan.runDir,
+		timeoutMs: plan.timeoutMs,
+		startedAt: opts.startedAt,
+		finishedAt: opts.finishedAt,
+		status: opts.status,
+		agents,
+	};
+	await write(manifestPathFor(plan.runDir), `${JSON.stringify(manifest, null, 2)}\n`, {
+		mode: 0o600,
+	});
+	return manifest;
+}
+
+/**
+ * List kept spawn runs under baseDir for `/spawn status`.
+ * @param {string} baseDir
+ * @param {{ readdir?: typeof readdir, readFile?: typeof readFile, readFindingFile?: typeof readFindingFile }} [deps]
+ */
+export async function listSpawnRunStatus(baseDir, deps = {}) {
+	const list = deps.readdir ?? readdir;
+	const read = deps.readFile ?? readFile;
+	const readFinding = deps.readFindingFile ?? readFindingFile;
+	let entries = [];
+	try {
+		entries = await list(baseDir, { withFileTypes: true });
+	} catch (err) {
+		if (err?.code === "ENOENT") return [];
+		throw err;
+	}
+	/** @type {Array<object>} */
+	const runs = [];
+	for (const entry of entries) {
+		const name = entry.name ?? entry;
+		const isDir = typeof entry.isDirectory === "function" ? entry.isDirectory() : true;
+		if (!isDir || !String(name).startsWith("pi-spawn-")) continue;
+		const runDir = join(baseDir, String(name));
+		let manifest = null;
+		try {
+			manifest = JSON.parse(await read(manifestPathFor(runDir), "utf8"));
+		} catch {
+			manifest = {
+				runId: String(name).replace(/^pi-spawn-/, ""),
+				runDir,
+				brief: "(no manifest)",
+				status: "unknown",
+				agents: [],
+			};
+		}
+		const agents = [];
+		for (const agent of manifest.agents ?? []) {
+			const findingPath = agent.findingPath || findingPathFor(runDir, agent.name);
+			const readResult = await readFinding(findingPath);
+			agents.push({
+				...agent,
+				findingPath,
+				hasFinding: readResult.ok,
+				findingBytes: readResult.ok ? Buffer.byteLength(readResult.content, "utf8") : 0,
+			});
+		}
+		runs.push({
+			...manifest,
+			runDir,
+			agents,
+			deliveredCount: agents.filter((a) => a.hasFinding).length,
+			pendingCount: agents.filter((a) => !a.hasFinding).length,
+		});
+	}
+	runs.sort((a, b) => String(b.startedAt || "").localeCompare(String(a.startedAt || "")));
+	return runs;
+}
+
+/** Format `/spawn status` output. */
+export function formatSpawnStatus(runs) {
+	if (!runs?.length) {
+		return "No kept spawn runs. Complete runs are cleaned up; partial/cancelled runs stay under the spawn-runs dir.";
+	}
+	const parts = [`Spawn runs: ${runs.length} kept`];
+	for (const run of runs) {
+		parts.push("");
+		parts.push(`## ${basename(run.runDir)}`);
+		parts.push(`Status: ${run.status ?? "unknown"}`);
+		parts.push(`Delivered: ${run.deliveredCount}/${(run.agents ?? []).length}`);
+		if (run.startedAt) parts.push(`Started: ${run.startedAt}`);
+		if (run.finishedAt) parts.push(`Finished: ${run.finishedAt}`);
+		parts.push(`Dir: ${run.runDir}`);
+		const brief = String(run.brief || "").trim().replace(/\s+/g, " ");
+		if (brief) parts.push(`Brief: ${brief.slice(0, 160)}${brief.length > 160 ? "…" : ""}`);
+		for (const agent of run.agents ?? []) {
+			const where = agent.paneId ? ` pane ${agent.paneId}` : "";
+			const mark = agent.hasFinding ? "delivered" : agent.reason || "pending";
+			parts.push(`- ${agent.name}: ${mark}${where} → ${agent.findingPath}`);
+		}
+	}
+	parts.push("");
+	parts.push("To fold a late finding into the report, read its finding file and synthesize. Do not call herdr_agent wait.");
+	return parts.join("\n");
 }

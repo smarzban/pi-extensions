@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { Type } from "typebox";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { SPAWN_COMMAND, SPAWN_TOOL, formatSpawnResult } from "./core.mjs";
@@ -17,7 +16,6 @@ export type InstallSpawnDeps = {
 	baseDir?: string;
 	getCwd?: (ctx: { cwd: string }) => string;
 	getHerdrEnv?: () => string | undefined;
-	getParentPaneId?: () => string | undefined;
 };
 
 /**
@@ -28,10 +26,9 @@ export function installSpawn(pi: ExtensionAPI, deps: InstallSpawnDeps = {}) {
 		configPath: deps.configPath ?? join(getAgentDir(), "spawn.json"),
 		runHeadless: deps.runHeadless ?? defaultRunHeadless,
 		runHerdr: deps.runHerdr ?? defaultRunHerdr,
-		baseDir: deps.baseDir ?? tmpdir(),
+		baseDir: deps.baseDir ?? join(getAgentDir(), "spawn-runs"),
 		getCwd: deps.getCwd,
 		getHerdrEnv: deps.getHerdrEnv,
-		getParentPaneId: deps.getParentPaneId,
 		parameters: Type.Object({
 			brief: Type.String({ description: "Confirmed brief text sent to every child" }),
 			confirmed: Type.Boolean({ description: "Must be true; user confirmed the brief" }),
