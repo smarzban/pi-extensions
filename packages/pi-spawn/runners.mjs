@@ -135,6 +135,7 @@ export async function defaultRunHeadless(launch, opts = {}) {
 export async function defaultRunHerdr(launch, opts = {}) {
 	const timeoutMs = opts.timeoutMs ?? launch.herdr.timeoutMs ?? launch.timeoutMs ?? 300_000;
 	let paneId;
+	let tabId;
 	try {
 		const created = await runCommand(
 			"herdr",
@@ -146,6 +147,7 @@ export async function defaultRunHerdr(launch, opts = {}) {
 		}
 		const payload = parseJsonLine(created.stdout);
 		paneId = payload?.result?.root_pane?.pane_id;
+		tabId = payload?.result?.tab?.tab_id ?? payload?.result?.root_pane?.tab_id;
 		if (!paneId) throw new Error("herdr tab create did not return pane_id");
 
 		const started = await runCommand(
@@ -187,11 +189,12 @@ export async function defaultRunHerdr(launch, opts = {}) {
 		if (prompted.code !== 0) {
 			throw new Error(`herdr agent prompt failed: ${prompted.stderr || prompted.stdout}`);
 		}
-		return { paneId };
+		return { paneId, tabId };
 	} catch (err) {
-		if (paneId) {
+		// `herdr tab close` accepts a tab_id, not a pane_id.
+		if (tabId) {
 			try {
-				await runCommand("herdr", ["tab", "close", paneId], { timeoutMs: 15_000 });
+				await runCommand("herdr", ["tab", "close", tabId], { timeoutMs: 15_000 });
 			} catch {
 				/* best-effort cleanup */
 			}

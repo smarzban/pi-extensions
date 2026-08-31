@@ -230,6 +230,19 @@ export function buildFindingPrompt({ brief, findingPath, agentName }) {
 }
 
 /**
+ * Herdr `agent start` names must match ^[a-z][a-z0-9_-]{0,31}$.
+ * Lowercase, replace invalid runs with "-", strip a non-letter prefix, cap at 32.
+ * @param {string} name
+ */
+export function sanitizeHerdrAgentName(name) {
+	const out = String(name)
+		.toLowerCase()
+		.replace(/[^a-z0-9_-]+/g, "-")
+		.replace(/^[^a-z]+/, "");
+	return (out || "agent").slice(0, 32);
+}
+
+/**
  * Pure per-child launch descriptor (no live Herdr/pi calls).
  * @param {{
  *   agent: { name: string, model: string, thinking: string },
@@ -273,7 +286,7 @@ export function buildChildLaunch(input) {
 
 	const herdr = {
 		kind: "pi",
-		agentLabel: agent.name,
+		agentLabel: sanitizeHerdrAgentName(agent.name),
 		tabLabel: `spawn:${agent.name}`,
 		cwd,
 		agentArgs: [...modelArgs],

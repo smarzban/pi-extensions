@@ -13,6 +13,7 @@ import {
 	assertConfirmed,
 	chooseRuntime,
 	buildChildLaunch,
+	sanitizeHerdrAgentName,
 	createRunDir,
 	awaitAndCollect,
 	cleanupRunDir,
@@ -216,6 +217,31 @@ test("buildChildLaunch herdr plan names tab and pi kind", () => {
 	assert.equal(launch.herdr.timeoutMs, 12_000);
 	assert.ok(launch.herdr.tabLabel.includes("fable"));
 	assert.deepEqual(launch.herdr.agentArgs.slice(0, 4), ["--model", "openai/gpt-5", "--thinking", "medium"]);
+});
+
+test("sanitizeHerdrAgentName produces valid herdr agent names", () => {
+	const valid = /^[a-z][a-z0-9_-]{0,31}$/;
+	assert.equal(sanitizeHerdrAgentName("Opus"), "opus");
+	assert.equal(sanitizeHerdrAgentName("Fable 2.0"), "fable-2-0");
+	assert.equal(sanitizeHerdrAgentName("123"), "agent");
+	assert.equal(sanitizeHerdrAgentName("_leading"), "leading");
+	assert.equal(sanitizeHerdrAgentName("x".repeat(40)).length, 32);
+	for (const name of ["Opus", "Fable 2.0", "123", "_leading", "x".repeat(40), "ok-name"]) {
+		assert.match(sanitizeHerdrAgentName(name), valid);
+	}
+});
+
+test("buildChildLaunch sanitizes herdr agentLabel but keeps agentName", () => {
+	const launch = buildChildLaunch({
+		agent: { name: "Opus 4.6", model: "anthropic/claude-opus-4", thinking: "high" },
+		cwd: "/work",
+		brief: "Compare approaches",
+		findingPath: "/tmp/run/opus.md",
+		runtime: "herdr",
+		timeoutMs: 12_000,
+	});
+	assert.equal(launch.agentName, "Opus 4.6");
+	assert.equal(launch.herdr.agentLabel, "opus-4-6");
 });
 
 test("awaitAndCollect returns finished findings and marks missing after timeout", async () => {
