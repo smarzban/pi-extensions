@@ -529,6 +529,10 @@ test("executeSpawnRun times out without waiting forever for hung runner", async 
 	assert.equal(result.findings.length, 1);
 	assert.equal(result.findings[0].agentName, "opus");
 	assert.ok(result.missing.some((m) => m.agentName === "fable"));
+	assert.equal(result.timedOut, true);
+	const fableMiss = result.missing.find((m) => m.agentName === "fable");
+	assert.equal(fableMiss.reason, "timeout");
+	assert.equal(result.startErrors.length, 0);
 	// A straggler is outstanding: the run dir must be kept for late findings.
 	assert.equal(cleaned, false);
 	assert.equal(result.runDirKept, true);
@@ -694,6 +698,92 @@ test("validateSpawnConfig allows null timeoutMs (wait until done)", async () => 
 		timeoutMs: null,
 	});
 	assert.equal(cfg.timeoutMs, null);
+});
+
+test("executeSpawnRun with timeoutMs null waits until every child finishes", async () => {
+	const root = await tempDir("pi-spawn-waitall-");
+	const plan = planSpawnRun({
+		config: { ...fixtureConfig, timeoutMs: null },
+		brief: "wait until all",
+		confirmed: true,
+		useDefaultSet: false,
+		names: ["opus", "fable"],
+		cwd: root,
+		background: true,
+		runId: "waitall",
+		baseDir: root,
+	});
+	assert.equal(plan.timeoutMs, null);
+	let fableStarted = 0;
+	const result = await executeSpawnRun(plan, {
+		runHeadless: async (launch) => {
+			if (launch.agentName === "opus") {
+				await writeFile(launch.findingPath, "opus\n");
+				return;
+			}
+			fableStarted = Date.now();
+			await new Promise((r) => setTimeout(r, 40));
+			await writeFile(launch.findingPath, "fable\n");
+		},
+		awaitAndCollect: (input) => awaitAndCollect({ ...input, pollMs: 5 }),
+	});
+	assert.ok(fableStarted > 0);
+	assert.equal(result.timedOut, false);
+	assert.equal(result.timeoutMs, null);
+	assert.equal(result.findings.length, 2);
+	assert.equal(result.missing.length, 0);
+	assert.equal(result.runDirKept, false);
+	await rm(root, { recursive: true, force: true });
+});
+
+test("executeSpawnRun writes manifest that /spawn status can read after a partial run", async () => {
+	const { listSpawnRunStatus, formatSpawnStatus, manifestPathFor } = await import("./core.mjs");
+	const root = await tempDir("pi-spawn-manifest-");
+	const plan = planSpawnRun({
+		config: { ...fixtureConfig, timeoutMs: 60 },
+		brief: "partial for status",
+		confirmed: true,
+		useDefaultSet: false,
+		names: ["opus", "fable"],
+		cwd: root,
+		background: true,
+		runId: "partial-status",
+		baseDir: root,
+	});
+	const result = await executeSpawnRun(plan, {
+		runHeadless: async (launch, opts = {}) => {
+			if (launch.agentName === "opus") {
+				await writeFile(launch.findingPath, "opus ok\n");
+				return;
+			}
+			await new Promise((_, reject) => {
+				if (opts.signal?.aborted) {
+					reject(new Error("aborted"));
+					return;
+				}
+				opts.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+					once: true,
+				});
+			});
+		},
+		awaitAndCollect: (input) => awaitAndCollect({ ...input, pollMs: 5 }),
+	});
+	assert.equal(result.runDirKept, true);
+	assert.equal(result.timedOut, true);
+	assert.equal(result.startErrors.length, 0);
+	const manifestRaw = await readFile(manifestPathFor(plan.runDir), "utf8");
+	const manifest = JSON.parse(manifestRaw);
+	assert.equal(manifest.status, "partial");
+	assert.equal(manifest.brief, "partial for status");
+	assert.ok(manifest.agents.some((a) => a.name === "fable" && a.status === "missing"));
+
+	const runs = await listSpawnRunStatus(root);
+	assert.equal(runs.length, 1);
+	assert.equal(runs[0].deliveredCount, 1);
+	assert.equal(runs[0].pendingCount, 1);
+	assert.match(formatSpawnStatus(runs), /Delivered: 1\/2/);
+	assert.match(formatSpawnStatus(runs), /partial for status/);
+	await rm(root, { recursive: true, force: true });
 });
 
 test("executeSpawnRun records startErrors when a runner rejects", async () => {
@@ -885,6 +975,71 @@ test("defaultRunHerdr creates tab, starts agent, prompts with timeout, never clo
 	assert.ok(!calls.some((c) => c.args.includes("close")));
 });
 
+test("defaultRunHerdr omits --timeout when timeoutMs is null", async () => {
+	const { defaultRunHerdr } = await import("./runners.mjs");
+	const calls = [];
+	await defaultRunHerdr(
+		{
+			cwd: "/work",
+			timeoutMs: null,
+			herdr: {
+				kind: "pi",
+				agentLabel: "opus",
+				tabLabel: "spawn:opus",
+				agentArgs: ["--model", "m"],
+				prompt: "brief",
+				timeoutMs: null,
+			},
+		},
+		{
+			timeoutMs: null,
+			runCommand: async (_cmd, args, options) => {
+				calls.push({ args, options });
+				if (args[0] === "tab" && args[1] === "create") {
+					return {
+						stdout: JSON.stringify({
+							result: { root_pane: { pane_id: "p1", tab_id: "t1" }, tab: { tab_id: "t1" } },
+						}),
+						stderr: "",
+						code: 0,
+					};
+				}
+				if (args[0] === "agent" && args[1] === "start") {
+					return {
+						stdout: JSON.stringify({ result: { agent: { agent: "pi" } } }),
+						stderr: "",
+						code: 0,
+					};
+				}
+				return { stdout: "{}", stderr: "", code: 0 };
+			},
+		},
+	);
+	const prompt = calls.find((c) => c.args[0] === "agent" && c.args[1] === "prompt");
+	assert.ok(prompt);
+	assert.ok(!prompt.args.includes("--timeout"));
+	assert.equal(prompt.options.timeoutMs, undefined);
+	const create = calls.find((c) => c.args[0] === "tab");
+	assert.equal(create.options.timeoutMs, 60_000);
+});
+
+test("defaultRunHeadless omits timeoutMs when null", async () => {
+	const { defaultRunHeadless } = await import("./runners.mjs");
+	const calls = [];
+	await defaultRunHeadless(
+		{ argv: ["pi", "-p", "--", "hi"], cwd: "/w", timeoutMs: null },
+		{
+			timeoutMs: null,
+			runCommand: async (cmd, args, options) => {
+				calls.push({ cmd, args, options });
+				return { stdout: "", stderr: "", code: 0 };
+			},
+		},
+	);
+	assert.equal(calls.length, 1);
+	assert.equal(calls[0].options.timeoutMs, undefined);
+});
+
 test("defaultRunHerdr retries agent start when pane is not yet an available shell", async () => {
 	const { defaultRunHerdr } = await import("./runners.mjs");
 	const starts = [];
@@ -1038,6 +1193,15 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 	assert.ok(messages.some((m) => /look into/i.test(m.content) && m._opts?.triggerTurn === true));
 	await commands.get("spawn").handler("opus on this", { ui: { notify() {} } });
 	assert.ok(messages.some((m) => /opus/i.test(m.content) && /confirm/i.test(m.content)));
+
+	await commands.get("spawn").handler("status", { ui: { notify() {} } });
+	assert.ok(
+		messages.some(
+			(m) =>
+				typeof m.content === "string" &&
+				(/No kept spawn runs/i.test(m.content) || /Spawn runs:/i.test(m.content)),
+		),
+	);
 
 	const toolResult = await tools.get("spawn_run").execute(
 		"id1",

@@ -725,9 +725,11 @@ export async function executeSpawnRun(plan, deps = {}) {
 			return { agentName: launch.agentName, ok: true };
 		} catch (err) {
 			const error = String(err?.message || err);
-			settled.set(launch.agentName, { error });
-			startErrors.push({ agentName: launch.agentName, error });
-			return { agentName: launch.agentName, ok: false, error };
+			const aborted = isAbortLikeError(err);
+			settled.set(launch.agentName, { error, aborted });
+			// Abort from safety ceiling / tool cancel is not a start failure.
+			if (!aborted) startErrors.push({ agentName: launch.agentName, error });
+			return { agentName: launch.agentName, ok: false, error, aborted };
 		}
 	});
 	// Attach immediately so early runner rejections are not unhandled.
@@ -770,6 +772,7 @@ export async function executeSpawnRun(plan, deps = {}) {
 			settledReason: (name) => {
 				const entry = settled.get(name);
 				if (!entry) return hitSafetyTimeout ? "timeout" : "still-running";
+				if (entry.aborted) return hitSafetyTimeout ? "timeout" : "cancelled";
 				return entry.error ? `start-error: ${entry.error}` : "no-finding";
 			},
 			now,
@@ -810,6 +813,13 @@ export async function executeSpawnRun(plan, deps = {}) {
 
 function collectedCleanly(collected) {
 	return Boolean(collected) && collected.missing.length === 0;
+}
+
+/** AbortController / runner abort messages are not start failures. */
+function isAbortLikeError(err) {
+	if (!err) return false;
+	if (err.name === "AbortError") return true;
+	return /\baborted\b/i.test(String(err.message || err));
 }
 
 export function manifestPathFor(runDir) {
