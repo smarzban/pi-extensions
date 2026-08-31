@@ -46,8 +46,10 @@ One package with an extension (command + tools) and a bundled skill. The **paren
 | Runtime | Herdr tabs if `HERDR_ENV=1`, else headless; background request → headless |
 | Cwd | Parent session cwd |
 | Child tools | Full normal Pi tools |
-| Failure | Wait until timeout; synthesize partial; mark missing/failed |
-| Findings | Temp dir per run; delete after report |
+| Failure | Wait until timeout; synthesize partial; mark missing/failed; parent inspects stragglers' panes via herdr tools before concluding |
+| Findings | Temp dir per run; deleted only when every agent delivered, kept while stragglers are outstanding so late findings can land |
+| Tab lifecycle | Spawn tabs are never closed by the extension (success or failure); closing is a user decision |
+| Straggler pings | Herdr children get the parent pane id and ping `spawn-ping: <agent> done` when they finish late |
 | Synthesis | Parent in-chat |
 
 ### Glossary terms touched
@@ -81,9 +83,10 @@ Given a confirmed spawn run, when children start, each gets the parent cwd, norm
 Given a run with a timeout, when the timeout elapses, finished findings are returned, missing/failed agents are marked, and the run does not wait forever.
 *Verification:* test-backed (unit)
 
-### AC-6 · Temp findings cleaned after collect
-Given findings written under a temp run dir, when collect completes (success or partial), that temp dir is deleted and no persisted run history remains under the agent dir.
+### AC-6 · Temp findings cleaned after full collect
+Given findings written under a temp run dir, when collect completes with every agent delivered, that temp dir is deleted and no persisted run history remains under the agent dir. When agents are still outstanding (timeout or collect failure), the run dir is kept so late findings can land.
 *Verification:* test-backed (unit)
+<!-- amended 2026-09: owner decided partial runs keep the dir; tabs never auto-close; children ping the parent pane when late -->
 
 ### AC-7 · /spawn command surfaces
 Given the extension is loaded, `/spawn`, `/spawn <name> on this`, `/spawn the agents on this`, and bare `/spawn` are registered and parse into the spawn tool flow (ask for topic when bare).
