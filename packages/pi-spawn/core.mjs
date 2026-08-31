@@ -196,3 +196,93 @@ export function assertConfirmed(input = {}) {
 	}
 	return brief;
 }
+
+/**
+ * Pick display runtime: Herdr tabs when HERDR_ENV=1 unless background/headless requested.
+ * @param {{ herdrEnv?: string, background?: boolean }} input
+ * @returns {"herdr" | "headless"}
+ */
+export function chooseRuntime(input = {}) {
+	const inHerdr = String(input.herdrEnv ?? "") === "1";
+	if (input.background) return "headless";
+	return inHerdr ? "herdr" : "headless";
+}
+
+/**
+ * Build the prompt that tells a child to answer the brief and write a finding file.
+ * @param {{ brief: string, findingPath: string, agentName: string }} input
+ */
+export function buildFindingPrompt({ brief, findingPath, agentName }) {
+	return [
+		`You are spawned agent "${agentName}" working the same confirmed brief as sibling agents.`,
+		"Answer the brief thoroughly using your normal Pi tools.",
+		"When finished, write your complete finding as Markdown to this exact path (overwrite if needed):",
+		findingPath,
+		"Do not ask the parent for confirmation. Do not spawn further agents.",
+		"",
+		"## Confirmed brief",
+		brief,
+	].join("\n");
+}
+
+/**
+ * Pure per-child launch descriptor (no live Herdr/pi calls).
+ * @param {{
+ *   agent: { name: string, model: string, thinking: string },
+ *   cwd: string,
+ *   brief: string,
+ *   findingPath: string,
+ *   runtime: "herdr" | "headless",
+ * }} input
+ */
+export function buildChildLaunch(input) {
+	const { agent, cwd, brief, findingPath, runtime } = input;
+	if (!agent?.name || !agent?.model) throw new Error("buildChildLaunch requires agent name and model");
+	if (!cwd) throw new Error("buildChildLaunch requires cwd");
+	if (!brief?.trim()) throw new Error("buildChildLaunch requires brief");
+	if (!findingPath) throw new Error("buildChildLaunch requires findingPath");
+	if (runtime !== "herdr" && runtime !== "headless") {
+		throw new Error(`unknown runtime: ${runtime}`);
+	}
+
+	const prompt = buildFindingPrompt({
+		brief: brief.trim(),
+		findingPath,
+		agentName: agent.name,
+	});
+
+	const modelArgs = ["--model", agent.model, "--thinking", agent.thinking ?? "off"];
+	const headlessArgv = [
+		"pi",
+		"-p",
+		"--no-session",
+		...modelArgs,
+		"--append-system-prompt",
+		`Write your final finding as Markdown to ${findingPath} when done.`,
+		"--",
+		prompt,
+	];
+
+	const herdr = {
+		kind: "pi",
+		agentLabel: agent.name,
+		tabLabel: `spawn:${agent.name}`,
+		cwd,
+		agentArgs: [...modelArgs],
+		prompt,
+	};
+
+	return {
+		runtime,
+		agentName: agent.name,
+		cwd,
+		model: agent.model,
+		thinking: agent.thinking ?? "off",
+		tools: "full",
+		brief: brief.trim(),
+		findingPath,
+		prompt,
+		argv: headlessArgv,
+		herdr,
+	};
+}

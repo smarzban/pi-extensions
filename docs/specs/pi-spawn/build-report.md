@@ -9,8 +9,8 @@
 | Task | Status | Commit | AC advanced | Notes |
 |------|--------|--------|-------------|-------|
 | T-1 | done | `8a7af58` | AC-1 | Config load + resolveAgents |
-| T-2 | done | pending | AC-2, AC-7 | parseSpawnArgs + assertConfirmed |
-| T-3 | pending | — | AC-3, AC-4 | |
+| T-2 | done | `83c7005` | AC-2, AC-7 | parseSpawnArgs + assertConfirmed |
+| T-3 | done | pending | AC-3, AC-4 | chooseRuntime + buildChildLaunch |
 | T-4 | pending | — | AC-5, AC-6 | |
 | T-5 | pending | — | AC-7, AC-8, AC-9, AC-10 | |
 
@@ -35,7 +35,7 @@ npm notice total files: 3
 pack_rc=0
 ```
 
-### T-2 (@ `pending`)
+### T-2 (@ `83c7005`)
 
 ```
 $ cd packages/pi-spawn && node --test; echo test_rc=$?
@@ -50,6 +50,23 @@ $ cd packages/pi-spawn && node --test; echo test_rc=$?
 ✔ assertConfirmed blocks empty brief even when confirmed
 ✔ assertConfirmed passes confirmed brief through
 ℹ tests 10 / pass 10 / fail 0
+test_rc=0
+
+$ cd packages/pi-spawn && npm pack --dry-run; echo pack_rc=$?
+npm notice name: @smarzban/pi-spawn
+pack_rc=0
+```
+
+### T-3 (@ `pending`)
+
+```
+$ cd packages/pi-spawn && node --test; echo test_rc=$?
+✔ chooseRuntime uses herdr when HERDR_ENV=1 and not background
+✔ chooseRuntime uses headless outside Herdr
+✔ chooseRuntime forces headless when background requested even in Herdr
+✔ buildChildLaunch includes cwd model thinking tools brief and finding path
+✔ buildChildLaunch herdr plan names tab and pi kind
+ℹ tests 15 / pass 15 / fail 0
 test_rc=0
 
 $ cd packages/pi-spawn && npm pack --dry-run; echo pack_rc=$?
