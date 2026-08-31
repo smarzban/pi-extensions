@@ -23,6 +23,12 @@ function killProcessTree(child, signal) {
 	}
 }
 
+function makeAbortError(message) {
+	const err = new Error(message);
+	err.name = "AbortError";
+	return err;
+}
+
 /**
  * @param {string} command
  * @param {string[]} args
@@ -38,7 +44,7 @@ function killProcessTree(child, signal) {
 export function runCommand(command, args, options = {}) {
 	return new Promise((resolve, reject) => {
 		if (options.signal?.aborted) {
-			reject(new Error(`${command} aborted`));
+			reject(makeAbortError(`${command} aborted`));
 			return;
 		}
 		const child = spawn(command, args, {
@@ -51,6 +57,7 @@ export function runCommand(command, args, options = {}) {
 		let stderr = "";
 		let settled = false;
 		let stopping = false;
+		let aborting = false;
 		let stopReason = "";
 		let killEscalation;
 		let hardDeadline;
@@ -69,9 +76,13 @@ export function runCommand(command, args, options = {}) {
 			fn();
 		};
 
-		const forceStop = (reason) => {
+		const rejectStop = () =>
+			aborting ? makeAbortError(stopReason) : new Error(stopReason);
+
+		const forceStop = (reason, isAbort = false) => {
 			if (settled || stopping) return;
 			stopping = true;
+			aborting = isAbort;
 			stopReason = reason;
 			killProcessTree(child, "SIGTERM");
 			killEscalation = setTimeout(() => {
@@ -79,7 +90,7 @@ export function runCommand(command, args, options = {}) {
 			}, graceMs);
 			// If the process ignores both signals, still settle so callers are not stuck.
 			hardDeadline = setTimeout(() => {
-				finish(() => reject(new Error(stopReason)));
+				finish(() => reject(rejectStop()));
 			}, graceMs * 2 + 50);
 		};
 
@@ -91,7 +102,7 @@ export function runCommand(command, args, options = {}) {
 				: undefined;
 
 		const onAbort = () => {
-			forceStop(`${command} aborted`);
+			forceStop(`${command} aborted`, true);
 		};
 		options.signal?.addEventListener("abort", onAbort, { once: true });
 		child.stdout.on("data", (chunk) => {
@@ -105,7 +116,7 @@ export function runCommand(command, args, options = {}) {
 		});
 		child.on("close", (code) => {
 			if (stopping) {
-				finish(() => reject(new Error(stopReason)));
+				finish(() => reject(rejectStop()));
 				return;
 			}
 			finish(() => resolve({ stdout, stderr, code: code ?? 1 }));
@@ -143,7 +154,7 @@ function isAgentPaneBusy(stderr = "", stdout = "") {
 }
 
 function sleep(ms, signal, sleepFn) {
-	if (signal?.aborted) return Promise.reject(new Error("herdr aborted"));
+	if (signal?.aborted) return Promise.reject(makeAbortError("herdr aborted"));
 	if (sleepFn) return Promise.resolve(sleepFn(ms));
 	return new Promise((resolve, reject) => {
 		const timer = setTimeout(() => {
@@ -152,7 +163,7 @@ function sleep(ms, signal, sleepFn) {
 		}, ms);
 		const onAbort = () => {
 			clearTimeout(timer);
-			reject(new Error("herdr aborted"));
+			reject(makeAbortError("herdr aborted"));
 		};
 		signal?.addEventListener("abort", onAbort, { once: true });
 	});
@@ -180,7 +191,7 @@ export async function startHerdrAgentWithRetry(launch, paneId, opts = {}) {
 	let attempts = 0;
 
 	while (Date.now() - startedAt < budgetMs) {
-		if (opts.signal?.aborted) throw new Error("herdr agent start aborted");
+		if (opts.signal?.aborted) throw makeAbortError("herdr agent start aborted");
 		attempts += 1;
 		const remaining = Math.max(1_000, budgetMs - (Date.now() - startedAt));
 		const started = await run(

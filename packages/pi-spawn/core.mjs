@@ -815,11 +815,12 @@ function collectedCleanly(collected) {
 	return Boolean(collected) && collected.missing.length === 0;
 }
 
-/** AbortController / runner abort messages are not start failures. */
+/** AbortController / runner abort — not a start failure. */
 function isAbortLikeError(err) {
 	if (!err) return false;
 	if (err.name === "AbortError") return true;
-	return /\baborted\b/i.test(String(err.message || err));
+	// Injectable test runners may reject with a bare message.
+	return String(err.message || err).trim() === "aborted";
 }
 
 export function manifestPathFor(runDir) {

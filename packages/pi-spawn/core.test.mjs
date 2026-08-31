@@ -809,6 +809,32 @@ test("executeSpawnRun records startErrors when a runner rejects", async () => {
 	await rm(root, { recursive: true, force: true });
 });
 
+test("executeSpawnRun keeps genuine failures containing aborted as startErrors", async () => {
+	const root = await tempDir("pi-spawn-connabort-");
+	const plan = planSpawnRun({
+		config: { ...fixtureConfig, timeoutMs: 200 },
+		brief: "not a cancel",
+		confirmed: true,
+		useDefaultSet: false,
+		names: ["opus"],
+		cwd: root,
+		background: true,
+		runId: "connabort",
+		baseDir: root,
+	});
+	const result = await executeSpawnRun(plan, {
+		runHeadless: async () => {
+			throw new Error("connection aborted");
+		},
+	});
+	assert.ok(
+		result.startErrors.some((e) => e.agentName === "opus" && /connection aborted/.test(e.error)),
+	);
+	assert.ok(result.missing.some((m) => /start-error: connection aborted/.test(m.reason)));
+	assert.equal(result.timedOut, false);
+	await rm(root, { recursive: true, force: true });
+});
+
 test("awaitAndCollect ignores in-progress finding until child is settled", async () => {
 	const root = await tempDir("pi-spawn-partial-");
 	const run = await createRunDir({ runId: "partial", baseDir: root });
