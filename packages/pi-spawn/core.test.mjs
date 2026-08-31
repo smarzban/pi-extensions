@@ -1,9 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, access, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, access, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { loadSpawnConfig, resolveAgents, parseSpawnArgs, assertConfirmed, chooseRuntime, buildChildLaunch, createRunDir, awaitAndCollect, cleanupRunDir, findingPathFor } from "./core.mjs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import {
+	loadSpawnConfig,
+	resolveAgents,
+	parseSpawnArgs,
+	assertConfirmed,
+	chooseRuntime,
+	buildChildLaunch,
+	createRunDir,
+	awaitAndCollect,
+	cleanupRunDir,
+	findingPathFor,
+	SPAWN_COMMAND,
+	SPAWN_TOOL,
+	planSpawnRun,
+} from "./core.mjs";
 
 const fixtureConfig = {
 	agents: {
@@ -201,4 +216,55 @@ test("cleanupRunDir deletes temp findings after collect", async () => {
 
 	await assert.rejects(() => access(run.runDir), /ENOENT/);
 	await rm(root, { recursive: true, force: true });
+});
+
+test("SPAWN_COMMAND and SPAWN_TOOL names are spawn", () => {
+	assert.equal(SPAWN_COMMAND, "spawn");
+	assert.equal(SPAWN_TOOL, "spawn_run");
+});
+
+test("planSpawnRun refuses unconfirmed brief before building launches", () => {
+	assert.throws(
+		() =>
+			planSpawnRun({
+				config: fixtureConfig,
+				brief: "look into auth",
+				confirmed: false,
+				useDefaultSet: true,
+				cwd: "/tmp/proj",
+				herdrEnv: undefined,
+				background: false,
+				runId: "r1",
+				baseDir: "/tmp",
+			}),
+		/confirm/i,
+	);
+});
+
+test("planSpawnRun builds launches for default set when confirmed", () => {
+	const plan = planSpawnRun({
+		config: fixtureConfig,
+		brief: "look into auth",
+		confirmed: true,
+		useDefaultSet: true,
+		cwd: "/tmp/proj",
+		herdrEnv: "1",
+		background: false,
+		runId: "r1",
+		baseDir: "/tmp",
+	});
+	assert.equal(plan.runtime, "herdr");
+	assert.equal(plan.brief, "look into auth");
+	assert.equal(plan.launches.length, 2);
+	assert.equal(plan.launches[0].agentName, "opus");
+	assert.equal(plan.launches[0].cwd, "/tmp/proj");
+	assert.match(plan.launches[0].findingPath, /pi-spawn-r1/);
+});
+
+test("package.json declares spawn extension and skills", async () => {
+	const pkgPath = join(dirname(fileURLToPath(import.meta.url)), "package.json");
+	const pkg = JSON.parse(await readFile(pkgPath, "utf8"));
+	assert.equal(pkg.name, "@smarzban/pi-spawn");
+	assert.deepEqual(pkg.pi.extensions, ["./index.ts"]);
+	assert.deepEqual(pkg.pi.skills, ["./skills"]);
 });

@@ -27,6 +27,8 @@ packages/
   pi-statusline/        # Custom footer statusline
   pi-toolview/          # Compact built-in tool output display
   pi-editor/            # Rounded input editor box and draft stash
+  pi-usage/             # Local cross-harness token usage dashboard
+  pi-spawn/             # Fan-out confirmed brief to named Pi agents
 ```
 
 Each package has its own `package.json` with `"pi": { "extensions": [...] }` declaring entry points.

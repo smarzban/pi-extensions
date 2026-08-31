@@ -407,3 +407,98 @@ export async function cleanupRunDir(runDir, deps = {}) {
 	const remove = deps.rm ?? rm;
 	await remove(runDir, { recursive: true, force: true });
 }
+
+export const SPAWN_COMMAND = "spawn";
+export const SPAWN_TOOL = "spawn_run";
+
+/**
+ * Pure plan: confirm → resolve agents → runtime → per-child launch descriptors.
+ * Does not start children.
+ */
+export function planSpawnRun(input) {
+	const brief = assertConfirmed({ confirmed: input.confirmed, brief: input.brief });
+	const names = input.useDefaultSet ? undefined : input.names;
+	const agents = resolveAgents(input.config, names);
+	const runtime = chooseRuntime({
+		herdrEnv: input.herdrEnv,
+		background: Boolean(input.background),
+	});
+	const runId = String(input.runId || "").trim() || `run-${Date.now()}`;
+	const baseDir = input.baseDir ?? tmpdir();
+	const runDir = join(baseDir, `pi-spawn-${runId}`);
+	const launches = agents.map((agent) =>
+		buildChildLaunch({
+			agent,
+			cwd: input.cwd,
+			brief,
+			findingPath: findingPathFor(runDir, agent.name),
+			runtime,
+		}),
+	);
+	return {
+		runId,
+		runDir,
+		brief,
+		runtime,
+		timeoutMs: input.config.timeoutMs,
+		agents,
+		launches,
+	};
+}
+
+/**
+ * Create the run dir, start children via injectable runners, await/collect, cleanup.
+ * @param {ReturnType<typeof planSpawnRun>} plan
+ * @param {{
+ *   mkdir?: typeof import("node:fs/promises").mkdir,
+ *   awaitAndCollect?: typeof awaitAndCollect,
+ *   cleanupRunDir?: typeof cleanupRunDir,
+ *   runHeadless?: (launch: object) => Promise<unknown>,
+ *   runHerdr?: (launch: object) => Promise<unknown>,
+ * }} [deps]
+ */
+export async function executeSpawnRun(plan, deps = {}) {
+	const collect = deps.awaitAndCollect ?? awaitAndCollect;
+	const cleanup = deps.cleanupRunDir ?? cleanupRunDir;
+	const makeDir = deps.mkdir ?? mkdir;
+	const runHeadless = deps.runHeadless;
+	const runHerdr = deps.runHerdr;
+
+	await makeDir(plan.runDir, { recursive: true });
+
+	const starters = plan.launches.map(async (launch) => {
+		if (launch.runtime === "herdr") {
+			if (!runHerdr) throw new Error("herdr runner not configured");
+			return runHerdr(launch);
+		}
+		if (!runHeadless) throw new Error("headless runner not configured");
+		return runHeadless(launch);
+	});
+
+	const startResults = await Promise.allSettled(starters);
+	const startErrors = startResults
+		.map((r, i) =>
+			r.status === "rejected"
+				? { agentName: plan.launches[i].agentName, error: String(r.reason?.message || r.reason) }
+				: null,
+		)
+		.filter(Boolean);
+
+	const collected = await collect({
+		runDir: plan.runDir,
+		agents: plan.launches.map((l) => ({ name: l.agentName, findingPath: l.findingPath })),
+		timeoutMs: plan.timeoutMs,
+	});
+
+	await cleanup(plan.runDir);
+
+	return {
+		brief: plan.brief,
+		runtime: plan.runtime,
+		findings: collected.findings,
+		missing: collected.missing,
+		timedOut: collected.timedOut,
+		elapsedMs: collected.elapsedMs,
+		startErrors,
+	};
+}
