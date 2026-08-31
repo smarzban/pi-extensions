@@ -108,3 +108,91 @@ export function resolveAgents(config, names) {
 	}
 	return resolved;
 }
+
+/**
+ * Parse `/spawn` command args (text after the command name).
+ * Forms: bare, `<name> on this`, `the agents on this`, optional leading background/headless.
+ * @param {string} args
+ */
+export function parseSpawnArgs(args = "") {
+	const trimmed = String(args ?? "").trim();
+	if (!trimmed) {
+		return {
+			form: "bare",
+			asksForTopic: true,
+			useDefaultSet: true,
+			background: false,
+			names: undefined,
+			topic: undefined,
+		};
+	}
+
+	const tokens = trimmed.split(/\s+/);
+	let background = false;
+	let i = 0;
+	if (tokens[0] === "background" || tokens[0] === "headless") {
+		background = true;
+		i = 1;
+	}
+	const rest = tokens.slice(i).join(" ");
+	if (!rest) {
+		return {
+			form: "bare",
+			asksForTopic: true,
+			useDefaultSet: true,
+			background,
+			names: undefined,
+			topic: undefined,
+		};
+	}
+
+	const defaultOnThis = /^the\s+agents\s+on\s+this$/i;
+	if (defaultOnThis.test(rest)) {
+		return {
+			form: "default-set",
+			asksForTopic: false,
+			useDefaultSet: true,
+			background,
+			names: undefined,
+			topic: "this",
+		};
+	}
+
+	const namedOnThis = /^(\S+)\s+on\s+this$/i;
+	const namedMatch = rest.match(namedOnThis);
+	if (namedMatch) {
+		const name = namedMatch[1];
+		if (/^the$/i.test(name)) {
+			throw new Error(`unrecognized /spawn args: ${rest}`);
+		}
+		return {
+			form: "named",
+			asksForTopic: false,
+			useDefaultSet: false,
+			background,
+			names: [name],
+			topic: "this",
+		};
+	}
+
+	throw new Error(
+		`unrecognized /spawn args: ${rest} (try /spawn, /spawn <name> on this, /spawn the agents on this)`,
+	);
+}
+
+/**
+ * Gate fan-out: require explicit confirm and non-empty brief text.
+ * @param {{ confirmed?: boolean, brief?: string }} input
+ * @returns {string} trimmed brief
+ */
+export function assertConfirmed(input = {}) {
+	const confirmed = Boolean(input.confirmed);
+	const brief = typeof input.brief === "string" ? input.brief.trim() : "";
+	if (!confirmed) {
+		throw new Error("brief is not confirmed; ask the user to confirm before starting spawn");
+	}
+	if (!brief) {
+		throw new Error("brief is empty; draft a brief before starting spawn");
+	}
+	return brief;
+}
