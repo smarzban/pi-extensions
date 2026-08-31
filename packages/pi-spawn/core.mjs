@@ -536,6 +536,7 @@ export const SPAWN_TOOL = "spawn_run";
 
 /**
  * Format tool result for the parent. Finding bodies are untrusted data.
+ * Each body is wrapped in a unique BEGIN_/END_ token so a child cannot close the fence early.
  */
 export function formatSpawnResult(result) {
 	const parts = [];
@@ -552,9 +553,7 @@ export function formatSpawnResult(result) {
 	} else {
 		for (const finding of result.findings) {
 			parts.push(`### ${finding.agentName}`);
-			parts.push("~~~~~untrusted-finding");
-			parts.push(String(finding.content ?? "").trimEnd());
-			parts.push("~~~~~");
+			parts.push(...fenceUntrustedFinding(finding.agentName, finding.content));
 			parts.push("");
 		}
 	}
@@ -587,6 +586,15 @@ export function formatSpawnResult(result) {
 		}
 	}
 	return parts.join("\n");
+}
+
+/** @param {string} agentName @param {unknown} content */
+export function fenceUntrustedFinding(agentName, content) {
+	const safe = String(agentName || "agent").replace(/[^a-zA-Z0-9._-]+/g, "_") || "agent";
+	let token = `UNTRUSTED_FINDING_${safe}`;
+	const body = String(content ?? "");
+	while (body.includes(token)) token += "_X";
+	return [`BEGIN_${token}`, body.trimEnd(), `END_${token}`];
 }
 
 /**

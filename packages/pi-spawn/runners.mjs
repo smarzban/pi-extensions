@@ -125,7 +125,8 @@ function parseJsonLine(stdout) {
 
 export async function defaultRunHeadless(launch, opts = {}) {
 	const [cmd, ...args] = launch.argv;
-	return runCommand(cmd, args, {
+	const run = opts.runCommand ?? runCommand;
+	return run(cmd, args, {
 		cwd: launch.cwd,
 		timeoutMs: opts.timeoutMs ?? launch.timeoutMs,
 		signal: opts.signal,
@@ -134,9 +135,10 @@ export async function defaultRunHeadless(launch, opts = {}) {
 
 export async function defaultRunHerdr(launch, opts = {}) {
 	const timeoutMs = opts.timeoutMs ?? launch.herdr.timeoutMs ?? launch.timeoutMs ?? 300_000;
+	const run = opts.runCommand ?? runCommand;
 	// Spawn tabs are never closed here, on success or failure: they are the
 	// user's visibility surface. Closing is a user decision in the parent chat.
-	const created = await runCommand(
+	const created = await run(
 		"herdr",
 		["tab", "create", "--no-focus", "--cwd", launch.cwd, "--label", launch.herdr.tabLabel],
 		{ timeoutMs: Math.min(timeoutMs, 60_000), signal: opts.signal },
@@ -150,7 +152,7 @@ export async function defaultRunHerdr(launch, opts = {}) {
 	if (!paneId) throw new Error("herdr tab create did not return pane_id");
 	opts.onStarted?.({ paneId, tabId });
 
-	const started = await runCommand(
+	const started = await run(
 		"herdr",
 		[
 			"agent",
@@ -169,7 +171,7 @@ export async function defaultRunHerdr(launch, opts = {}) {
 		throw new Error(`herdr agent start failed: ${started.stderr || started.stdout}`);
 	}
 
-	const prompted = await runCommand(
+	const prompted = await run(
 		"herdr",
 		[
 			"agent",
