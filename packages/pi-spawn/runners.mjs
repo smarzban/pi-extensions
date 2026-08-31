@@ -126,9 +126,10 @@ function parseJsonLine(stdout) {
 export async function defaultRunHeadless(launch, opts = {}) {
 	const [cmd, ...args] = launch.argv;
 	const run = opts.runCommand ?? runCommand;
+	const timeoutMs = opts.timeoutMs ?? launch.timeoutMs;
 	return run(cmd, args, {
 		cwd: launch.cwd,
-		timeoutMs: opts.timeoutMs ?? launch.timeoutMs,
+		...(timeoutMs != null ? { timeoutMs } : {}),
 		signal: opts.signal,
 	});
 }
@@ -163,11 +164,13 @@ function sleep(ms, signal, sleepFn) {
  */
 export async function startHerdrAgentWithRetry(launch, paneId, opts = {}) {
 	const run = opts.runCommand ?? runCommand;
-	const timeoutMs = opts.timeoutMs ?? launch.herdr.timeoutMs ?? launch.timeoutMs ?? 300_000;
+	const timeoutMs = opts.timeoutMs ?? launch.herdr.timeoutMs ?? launch.timeoutMs;
 	const budgetMs =
 		Number.isFinite(opts.startBudgetMs) && opts.startBudgetMs > 0
 			? opts.startBudgetMs
-			: Math.min(timeoutMs, DEFAULT_START_BUDGET_MS);
+			: Number.isFinite(timeoutMs) && timeoutMs > 0
+				? Math.min(timeoutMs, DEFAULT_START_BUDGET_MS)
+				: DEFAULT_START_BUDGET_MS;
 	const retryMs =
 		Number.isFinite(opts.startRetryMs) && opts.startRetryMs >= 0
 			? opts.startRetryMs
@@ -227,14 +230,17 @@ export async function startHerdrAgentWithRetry(launch, paneId, opts = {}) {
 }
 
 export async function defaultRunHerdr(launch, opts = {}) {
-	const timeoutMs = opts.timeoutMs ?? launch.herdr.timeoutMs ?? launch.timeoutMs ?? 300_000;
+	const timeoutMs = opts.timeoutMs ?? launch.herdr.timeoutMs ?? launch.timeoutMs;
 	const run = opts.runCommand ?? runCommand;
 	// Spawn tabs are never closed here, on success or failure: they are the
 	// user's visibility surface. Closing is a user decision in the parent chat.
 	const created = await run(
 		"herdr",
 		["tab", "create", "--no-focus", "--cwd", launch.cwd, "--label", launch.herdr.tabLabel],
-		{ timeoutMs: Math.min(timeoutMs, 60_000), signal: opts.signal },
+		{
+			timeoutMs: timeoutMs != null ? Math.min(timeoutMs, 60_000) : 60_000,
+			signal: opts.signal,
+		},
 	);
 	if (created.code !== 0) {
 		throw new Error(`herdr tab create failed: ${created.stderr || created.stdout}`);
@@ -250,25 +256,17 @@ export async function defaultRunHerdr(launch, opts = {}) {
 	const started = await startHerdrAgentWithRetry(launch, paneId, opts);
 	opts.onAgentRunning?.({ paneId, tabId, agent: started.agent, attempts: started.attempts });
 
-	const prompted = await run(
-		"herdr",
-		[
-			"agent",
-			"prompt",
-			paneId,
-			launch.herdr.prompt,
-			"--wait",
-			"--until",
-			"done",
-			"--until",
-			"idle",
-			"--timeout",
-			String(timeoutMs),
-		],
-		{ timeoutMs: timeoutMs + 5_000, signal: opts.signal },
-	);
+	const promptArgs = ["agent", "prompt", paneId, launch.herdr.prompt, "--wait", "--until", "done", "--until", "idle"];
+	if (timeoutMs != null) {
+		promptArgs.push("--timeout", String(timeoutMs));
+	}
+	const prompted = await run("herdr", promptArgs, {
+		...(timeoutMs != null ? { timeoutMs: timeoutMs + 5_000 } : {}),
+		signal: opts.signal,
+	});
 	if (prompted.code !== 0) {
 		throw new Error(`herdr agent prompt failed: ${prompted.stderr || prompted.stdout}`);
 	}
 	return { paneId, tabId, agent: started.agent, startAttempts: started.attempts };
 }
+

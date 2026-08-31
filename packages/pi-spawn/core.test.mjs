@@ -640,22 +640,60 @@ test("executeSpawnRun keeps run dir when collect throws", async () => {
 	await rm(root, { recursive: true, force: true });
 });
 
-test("buildChildLaunch includes done-ping only for herdr children with a parent pane", () => {
+test("buildChildLaunch prompt never pings the parent pane", () => {
 	const base = {
 		agent: { name: "opus", model: "anthropic/claude-opus-4", thinking: "high" },
 		cwd: "/work",
-		brief: "ping test",
+		brief: "no ping",
 		findingPath: "/tmp/run/opus.md",
 		timeoutMs: 10_000,
-		parentPaneId: "wH:p16",
 	};
 	const herdrLaunch = buildChildLaunch({ ...base, runtime: "herdr" });
-	assert.match(herdrLaunch.prompt, /spawn-ping: opus done/);
-	assert.match(herdrLaunch.prompt, /herdr agent prompt wH:p16/);
+	assert.doesNotMatch(herdrLaunch.prompt, /spawn-ping/);
+	assert.doesNotMatch(herdrLaunch.prompt, /herdr agent prompt/);
+	assert.match(herdrLaunch.prompt, /Do not message the parent pane/);
 	const headlessLaunch = buildChildLaunch({ ...base, runtime: "headless" });
 	assert.doesNotMatch(headlessLaunch.prompt, /spawn-ping/);
-	const noPane = buildChildLaunch({ ...base, runtime: "herdr", parentPaneId: undefined });
-	assert.doesNotMatch(noPane.prompt, /spawn-ping/);
+});
+
+test("parseSpawnArgs status", () => {
+	const parsed = parseSpawnArgs("status");
+	assert.equal(parsed.form, "status");
+	assert.equal(parsed.asksForTopic, false);
+});
+
+test("listSpawnRunStatus reports late findings on kept runs", async () => {
+	const { listSpawnRunStatus, formatSpawnStatus, createRunDir, findingPathFor, manifestPathFor } = await import("./core.mjs");
+	const root = await tempDir("pi-spawn-status-");
+	const run = await createRunDir({ runId: "late-1", baseDir: root });
+	const opusPath = findingPathFor(run.runDir, "opus");
+	await writeFile(
+		manifestPathFor(run.runDir),
+		JSON.stringify({
+			runId: "late-1",
+			brief: "check status",
+			status: "partial",
+			startedAt: "2026-01-01T00:00:00.000Z",
+			agents: [{ name: "opus", findingPath: opusPath, status: "missing", reason: "timeout" }],
+		}),
+	);
+	await writeFile(opusPath, "# late\nok\n");
+	const runs = await listSpawnRunStatus(root);
+	assert.equal(runs.length, 1);
+	assert.equal(runs[0].deliveredCount, 1);
+	assert.equal(runs[0].agents[0].hasFinding, true);
+	assert.match(formatSpawnStatus(runs), /Delivered: 1\/1/);
+	await rm(root, { recursive: true, force: true });
+});
+
+test("validateSpawnConfig allows null timeoutMs (wait until done)", async () => {
+	const { validateSpawnConfig } = await import("./core.mjs");
+	const cfg = validateSpawnConfig({
+		agents: { opus: { model: "m", thinking: "off" } },
+		defaultSet: ["opus"],
+		timeoutMs: null,
+	});
+	assert.equal(cfg.timeoutMs, null);
 });
 
 test("executeSpawnRun records startErrors when a runner rejects", async () => {
