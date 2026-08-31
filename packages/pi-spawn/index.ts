@@ -17,6 +17,7 @@ export type InstallSpawnDeps = {
 	baseDir?: string;
 	getCwd?: (ctx: { cwd: string }) => string;
 	getHerdrEnv?: () => string | undefined;
+	getParentPaneId?: () => string | undefined;
 };
 
 /**
@@ -30,6 +31,7 @@ export function installSpawn(pi: ExtensionAPI, deps: InstallSpawnDeps = {}) {
 		baseDir: deps.baseDir ?? tmpdir(),
 		getCwd: deps.getCwd,
 		getHerdrEnv: deps.getHerdrEnv,
+		getParentPaneId: deps.getParentPaneId,
 		parameters: Type.Object({
 			brief: Type.String({ description: "Confirmed brief text sent to every child" }),
 			confirmed: Type.Boolean({ description: "Must be true; user confirmed the brief" }),

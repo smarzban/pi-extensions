@@ -134,71 +134,60 @@ export async function defaultRunHeadless(launch, opts = {}) {
 
 export async function defaultRunHerdr(launch, opts = {}) {
 	const timeoutMs = opts.timeoutMs ?? launch.herdr.timeoutMs ?? launch.timeoutMs ?? 300_000;
-	let paneId;
-	let tabId;
-	try {
-		const created = await runCommand(
-			"herdr",
-			["tab", "create", "--no-focus", "--cwd", launch.cwd, "--label", launch.herdr.tabLabel],
-			{ timeoutMs: Math.min(timeoutMs, 60_000), signal: opts.signal },
-		);
-		if (created.code !== 0) {
-			throw new Error(`herdr tab create failed: ${created.stderr || created.stdout}`);
-		}
-		const payload = parseJsonLine(created.stdout);
-		paneId = payload?.result?.root_pane?.pane_id;
-		tabId = payload?.result?.tab?.tab_id ?? payload?.result?.root_pane?.tab_id;
-		if (!paneId) throw new Error("herdr tab create did not return pane_id");
-
-		const started = await runCommand(
-			"herdr",
-			[
-				"agent",
-				"start",
-				launch.herdr.agentLabel,
-				"--kind",
-				launch.herdr.kind,
-				"--pane",
-				paneId,
-				"--",
-				...launch.herdr.agentArgs,
-			],
-			{ timeoutMs: Math.min(timeoutMs, 60_000), signal: opts.signal },
-		);
-		if (started.code !== 0) {
-			throw new Error(`herdr agent start failed: ${started.stderr || started.stdout}`);
-		}
-
-		const prompted = await runCommand(
-			"herdr",
-			[
-				"agent",
-				"prompt",
-				paneId,
-				launch.herdr.prompt,
-				"--wait",
-				"--until",
-				"done",
-				"--until",
-				"idle",
-				"--timeout",
-				String(timeoutMs),
-			],
-			{ timeoutMs: timeoutMs + 5_000, signal: opts.signal },
-		);
-		if (prompted.code !== 0) {
-			throw new Error(`herdr agent prompt failed: ${prompted.stderr || prompted.stdout}`);
-		}
-		return { paneId, tabId };
-	} catch (err) {
-		// `herdr tab close` accepts a tab_id, not a pane_id.
-		if (tabId) {
-			try {
-				await runCommand("herdr", ["tab", "close", tabId], { timeoutMs: 15_000 });
-			} catch {
-				/* best-effort cleanup */
-			}
-		}
-		throw err;
+	// Spawn tabs are never closed here, on success or failure: they are the
+	// user's visibility surface. Closing is a user decision in the parent chat.
+	const created = await runCommand(
+		"herdr",
+		["tab", "create", "--no-focus", "--cwd", launch.cwd, "--label", launch.herdr.tabLabel],
+		{ timeoutMs: Math.min(timeoutMs, 60_000), signal: opts.signal },
+	);
+	if (created.code !== 0) {
+		throw new Error(`herdr tab create failed: ${created.stderr || created.stdout}`);
 	}
+	const payload = parseJsonLine(created.stdout);
+	const paneId = payload?.result?.root_pane?.pane_id;
+	const tabId = payload?.result?.tab?.tab_id ?? payload?.result?.root_pane?.tab_id;
+	if (!paneId) throw new Error("herdr tab create did not return pane_id");
+	opts.onStarted?.({ paneId, tabId });
+
+	const started = await runCommand(
+		"herdr",
+		[
+			"agent",
+			"start",
+			launch.herdr.agentLabel,
+			"--kind",
+			launch.herdr.kind,
+			"--pane",
+			paneId,
+			"--",
+			...launch.herdr.agentArgs,
+		],
+		{ timeoutMs: Math.min(timeoutMs, 60_000), signal: opts.signal },
+	);
+	if (started.code !== 0) {
+		throw new Error(`herdr agent start failed: ${started.stderr || started.stdout}`);
+	}
+
+	const prompted = await runCommand(
+		"herdr",
+		[
+			"agent",
+			"prompt",
+			paneId,
+			launch.herdr.prompt,
+			"--wait",
+			"--until",
+			"done",
+			"--until",
+			"idle",
+			"--timeout",
+			String(timeoutMs),
+		],
+		{ timeoutMs: timeoutMs + 5_000, signal: opts.signal },
+	);
+	if (prompted.code !== 0) {
+		throw new Error(`herdr agent prompt failed: ${prompted.stderr || prompted.stdout}`);
+	}
+	return { paneId, tabId };
 }

@@ -17,6 +17,8 @@ Use this skill instead of manually opening Herdr tabs or inventing your own fan-
    - `useDefaultSet: true` for “the agents”, or `names: ["…"]` for a named agent
    - `background: true` if the user asked for background/headless
 4. **Synthesize** the returned findings in chat. Mark missing/failed agents clearly. Do not claim they finished.
+5. **Investigate stragglers**: for each missing agent that has a pane, use herdr tools (agent get/read on its pane) to determine whether it is stuck, blocked, waiting on usage limits, or still working. Only move on once the reason is clear. If it is still working, tell the user and offer to wait.
+6. **Handle spawn-pings**: a later message like `spawn-ping: <agent> done, finding at <path>` means a straggler finished. Read that finding file and fold it into the report.
 
 ## Surfaces
 
@@ -29,5 +31,6 @@ Use this skill instead of manually opening Herdr tabs or inventing your own fan-
 
 - Never start children until the user confirms the brief.
 - Never open Herdr tabs or run `pi -p` yourself for spawn; the tools own runtime selection (`HERDR_ENV=1` → Herdr tabs, else headless; background forces headless).
-- Children inherit the parent cwd and normal Pi tools; they write temp findings the tool collects and deletes.
+- **Never close spawn tabs or panes, on success or failure, unless the user explicitly asks.** They are the user's visibility surface.
+- Children inherit the parent cwd and normal Pi tools; they write temp findings the tool collects. The run dir is deleted only when every agent delivered; it is kept while stragglers are outstanding so late findings can still land.
 - Parent owns synthesis. There are no modes, no editor/optimizer model, and no persisted run history in v1.

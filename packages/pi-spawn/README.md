@@ -52,7 +52,9 @@ Runtime:
 - otherwise headless `pi -p --no-session`
 - “background” / “headless” request forces headless even inside Herdr
 
-Children inherit the parent cwd and normal Pi tools, write a finding to a temp path, and that temp run dir is deleted after collect.
+Children inherit the parent cwd and normal Pi tools and write a finding to a temp path. The temp run dir is deleted once every agent delivered; while stragglers are outstanding it is kept so late findings can still land. In Herdr, children are told the parent pane id and ping it (`spawn-ping: <agent> done`) when they finish after a timeout.
+
+Herdr spawn tabs are never closed by the extension, on success or failure; the parent assistant inspects timed-out agents' panes with herdr tools before concluding, and tabs are closed only when you ask.
 
 ## Scope (v1)
 

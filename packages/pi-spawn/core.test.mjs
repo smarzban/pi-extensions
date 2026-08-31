@@ -511,12 +511,77 @@ test("executeSpawnRun times out without waiting forever for hung runner", async 
 	assert.equal(result.findings.length, 1);
 	assert.equal(result.findings[0].agentName, "opus");
 	assert.ok(result.missing.some((m) => m.agentName === "fable"));
-	assert.equal(cleaned, true);
+	// A straggler is outstanding: the run dir must be kept for late findings.
+	assert.equal(cleaned, false);
+	assert.equal(result.runDirKept, true);
+	await access(plan.runDir);
+	await rm(root, { recursive: true, force: true });
+});
+
+test("executeSpawnRun cleans run dir when every agent delivered", async () => {
+	const root = await tempDir("pi-spawn-clean-");
+	const plan = planSpawnRun({
+		config: { ...fixtureConfig, timeoutMs: 2_000 },
+		brief: "clean path",
+		confirmed: true,
+		useDefaultSet: true,
+		cwd: root,
+		background: true,
+		runId: "clean",
+		baseDir: root,
+	});
+	const result = await executeSpawnRun(plan, {
+		runHeadless: async (launch) => {
+			await writeFile(launch.findingPath, `${launch.agentName} ok\n`);
+		},
+		awaitAndCollect: (input) => awaitAndCollect({ ...input, pollMs: 10 }),
+	});
+	assert.equal(result.findings.length, 2);
+	assert.equal(result.missing.length, 0);
+	assert.equal(result.runDirKept, false);
 	await assert.rejects(() => access(plan.runDir), /ENOENT/);
 	await rm(root, { recursive: true, force: true });
 });
 
-test("executeSpawnRun dispatches herdr vs headless and cleans on collect throw", async () => {
+test("executeSpawnRun threads pane info from onStarted into result.panes", async () => {
+	const root = await tempDir("pi-spawn-panes-");
+	const plan = planSpawnRun({
+		config: { ...fixtureConfig, timeoutMs: 100 },
+		brief: "panes",
+		confirmed: true,
+		useDefaultSet: false,
+		names: ["opus", "fable"],
+		cwd: root,
+		herdrEnv: "1",
+		runId: "panes",
+		baseDir: root,
+	});
+	const result = await executeSpawnRun(plan, {
+		runHerdr: async (launch, opts) => {
+			opts.onStarted?.({ paneId: `p-${launch.agentName}`, tabId: `t-${launch.agentName}` });
+			if (launch.agentName === "opus") {
+				await writeFile(launch.findingPath, "opus ok\n");
+				return;
+			}
+			await new Promise((_, reject) => {
+				opts.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+			});
+		},
+		awaitAndCollect: (input) => awaitAndCollect({ ...input, pollMs: 10 }),
+	});
+	assert.deepEqual(
+		result.panes.map((p) => p.agentName).sort(),
+		["fable", "opus"],
+	);
+	const text = formatSpawnResult(result);
+	assert.match(text, /fable: .*\(pane p-fable, tab t-fable\)/);
+	assert.match(text, /inspect it with herdr tools/i);
+	assert.match(text, /Never close spawn tabs or panes/);
+	assert.match(text, /run dir was kept/i);
+	await rm(root, { recursive: true, force: true });
+});
+
+test("executeSpawnRun keeps run dir when collect throws", async () => {
 	const root = await tempDir("pi-spawn-dispatch-");
 	const plan = planSpawnRun({
 		config: { ...fixtureConfig, timeoutMs: 100 },
@@ -553,8 +618,26 @@ test("executeSpawnRun dispatches herdr vs headless and cleans on collect throw",
 		/collect boom/,
 	);
 	assert.deepEqual(herdrNames.sort(), ["fable", "opus"]);
-	assert.equal(cleaned, true);
+	assert.equal(cleaned, false);
 	await rm(root, { recursive: true, force: true });
+});
+
+test("buildChildLaunch includes done-ping only for herdr children with a parent pane", () => {
+	const base = {
+		agent: { name: "opus", model: "anthropic/claude-opus-4", thinking: "high" },
+		cwd: "/work",
+		brief: "ping test",
+		findingPath: "/tmp/run/opus.md",
+		timeoutMs: 10_000,
+		parentPaneId: "wH:p16",
+	};
+	const herdrLaunch = buildChildLaunch({ ...base, runtime: "herdr" });
+	assert.match(herdrLaunch.prompt, /spawn-ping: opus done/);
+	assert.match(herdrLaunch.prompt, /herdr agent prompt wH:p16/);
+	const headlessLaunch = buildChildLaunch({ ...base, runtime: "headless" });
+	assert.doesNotMatch(headlessLaunch.prompt, /spawn-ping/);
+	const noPane = buildChildLaunch({ ...base, runtime: "herdr", parentPaneId: undefined });
+	assert.doesNotMatch(noPane.prompt, /spawn-ping/);
 });
 
 test("executeSpawnRun records startErrors when a runner rejects", async () => {
@@ -677,8 +760,8 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 		registerTool(def) {
 			tools.set(def.name, def);
 		},
-		async sendMessage(msg) {
-			messages.push(msg);
+		async sendMessage(msg, opts) {
+			messages.push({ ...msg, _opts: opts });
 		},
 	};
 	const dir = await tempDir("pi-spawn-install-");
@@ -705,7 +788,7 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 	assert.ok(tools.has("spawn_run"));
 	assert.equal(tools.get("spawn_run").name, "spawn_run");
 	await commands.get("spawn").handler("", { ui: { notify() {} } });
-	assert.ok(messages.some((m) => /look into/i.test(m.content)));
+	assert.ok(messages.some((m) => /look into/i.test(m.content) && m._opts?.triggerTurn === true));
 	await commands.get("spawn").handler("opus on this", { ui: { notify() {} } });
 	assert.ok(messages.some((m) => /opus/i.test(m.content) && /confirm/i.test(m.content)));
 

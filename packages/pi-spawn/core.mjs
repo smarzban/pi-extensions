@@ -213,20 +213,30 @@ export function chooseRuntime(input = {}) {
 
 /**
  * Build the prompt that tells a child to answer the brief and write a finding file.
- * @param {{ brief: string, findingPath: string, agentName: string }} input
+ * When parentPaneId is set, the child is told to ping the parent pane once done.
+ * @param {{ brief: string, findingPath: string, agentName: string, parentPaneId?: string }} input
  */
-export function buildFindingPrompt({ brief, findingPath, agentName }) {
-	return [
+export function buildFindingPrompt({ brief, findingPath, agentName, parentPaneId }) {
+	const lines = [
 		`You are spawned agent "${agentName}" working the same confirmed brief as sibling agents.`,
 		"Answer the brief thoroughly using your normal Pi tools.",
-	"When finished, write your complete finding as Markdown to this exact path (overwrite if needed):",
+		"When finished, write your complete finding as Markdown to this exact path (overwrite if needed):",
 		findingPath,
 		"Prefer writing to a sibling temp file then renaming onto that path so the file appears atomically.",
+	];
+	if (parentPaneId) {
+		lines.push(
+			"After the finding file is written, ping the parent pane so it knows you are done by running exactly:",
+			`herdr agent prompt ${parentPaneId} "spawn-ping: ${agentName} done, finding at ${findingPath}"`,
+		);
+	}
+	lines.push(
 		"Do not ask the parent for confirmation. Do not spawn further agents.",
 		"",
 		"## Confirmed brief",
 		brief,
-	].join("\n");
+	);
+	return lines.join("\n");
 }
 
 /**
@@ -251,10 +261,11 @@ export function sanitizeHerdrAgentName(name) {
  *   findingPath: string,
  *   runtime: "herdr" | "headless",
  *   timeoutMs: number,
+ *   parentPaneId?: string,
  * }} input
  */
 export function buildChildLaunch(input) {
-	const { agent, cwd, brief, findingPath, runtime, timeoutMs } = input;
+	const { agent, cwd, brief, findingPath, runtime, timeoutMs, parentPaneId } = input;
 	if (!agent?.name || !agent?.model) throw new Error("buildChildLaunch requires agent name and model");
 	if (!cwd) throw new Error("buildChildLaunch requires cwd");
 	if (!brief?.trim()) throw new Error("buildChildLaunch requires brief");
@@ -270,6 +281,8 @@ export function buildChildLaunch(input) {
 		brief: brief.trim(),
 		findingPath,
 		agentName: agent.name,
+		// Ping only makes sense for herdr children: headless children are killed at timeout.
+		parentPaneId: runtime === "herdr" ? parentPaneId : undefined,
 	});
 
 	const modelArgs = ["--model", agent.model, "--thinking", agent.thinking ?? "off"];
@@ -546,10 +559,26 @@ export function formatSpawnResult(result) {
 		}
 	}
 	if (result.missing?.length) {
+		const paneFor = new Map((result.panes ?? []).map((p) => [p.agentName, p]));
 		parts.push("## Missing / failed");
 		for (const miss of result.missing) {
-			parts.push(`- ${miss.agentName}: ${miss.reason ?? "missing"}`);
+			const pane = paneFor.get(miss.agentName);
+			const where = pane?.paneId ? ` (pane ${pane.paneId}${pane.tabId ? `, tab ${pane.tabId}` : ""})` : "";
+			parts.push(`- ${miss.agentName}: ${miss.reason ?? "missing"}${where}, expected finding: ${miss.findingPath}`);
 		}
+		parts.push("");
+		parts.push(
+			"Before concluding on a missing agent that has a pane, inspect it with herdr tools (herdr_agent get/read) to see whether it is stuck, blocked, waiting on usage limits, or still working. Only move on once the reason is clear.",
+		);
+		if (result.runDirKept) {
+			parts.push(
+				`The run dir was kept: still-running agents may land findings there later (a "spawn-ping: <agent> done" message may arrive). Read the finding file then and fold it into the report.`,
+			);
+		}
+	}
+	if (result.panes?.length) {
+		parts.push("");
+		parts.push("Never close spawn tabs or panes, on success or failure, unless the user explicitly asks.");
 	}
 	if (result.startErrors?.length) {
 		parts.push("## Start errors");
@@ -583,6 +612,7 @@ export function planSpawnRun(input) {
 			findingPath: findingPathFor(runDir, agent.name),
 			runtime,
 			timeoutMs: input.config.timeoutMs,
+			parentPaneId: input.parentPaneId,
 		}),
 	);
 	return {
@@ -604,7 +634,7 @@ export function planSpawnRun(input) {
  *   awaitAndCollect?: typeof awaitAndCollect,
  *   cleanupRunDir?: typeof cleanupRunDir,
  *   runHeadless?: (launch: object, opts: { timeoutMs: number, signal?: AbortSignal }) => Promise<unknown>,
- *   runHerdr?: (launch: object, opts: { timeoutMs: number, signal?: AbortSignal }) => Promise<unknown>,
+ *   runHerdr?: (launch: object, opts: { timeoutMs: number, signal?: AbortSignal, onStarted?: (info: object) => void }) => Promise<unknown>,
  *   signal?: AbortSignal,
  * }} [deps]
  */
@@ -622,6 +652,8 @@ export async function executeSpawnRun(plan, deps = {}) {
 	const settled = new Map();
 	/** @type {Array<{ agentName: string, error: string }>} */
 	const startErrors = [];
+	/** @type {Map<string, { paneId?: string, tabId?: string }>} */
+	const panes = new Map();
 
 	const ac = new AbortController();
 	const onOuterAbort = () => ac.abort();
@@ -632,13 +664,17 @@ export async function executeSpawnRun(plan, deps = {}) {
 	const runnerOpts = { timeoutMs: plan.timeoutMs, signal: ac.signal };
 
 	const starters = plan.launches.map(async (launch) => {
+		const opts = {
+			...runnerOpts,
+			onStarted: (info) => panes.set(launch.agentName, { ...info }),
+		};
 		try {
 			if (launch.runtime === "herdr") {
 				if (!runHerdr) throw new Error("herdr runner not configured");
-				await runHerdr(launch, runnerOpts);
+				await runHerdr(launch, opts);
 			} else {
 				if (!runHeadless) throw new Error("headless runner not configured");
-				await runHeadless(launch, runnerOpts);
+				await runHeadless(launch, opts);
 			}
 			settled.set(launch.agentName, {});
 			return { agentName: launch.agentName, ok: true };
@@ -669,16 +705,25 @@ export async function executeSpawnRun(plan, deps = {}) {
 		ac.abort();
 		if (outerSignal) outerSignal.removeEventListener("abort", onOuterAbort);
 		await startersSettled;
-		await cleanup(plan.runDir);
+		// Keep the run dir when agents are still outstanding (or collect failed):
+		// herdr stragglers stay alive in their tabs and may still write findings.
+		if (collectedCleanly(collected)) await cleanup(plan.runDir);
 	}
 
 	return {
 		brief: plan.brief,
 		runtime: plan.runtime,
+		runDir: plan.runDir,
+		runDirKept: !collectedCleanly(collected),
 		findings: collected.findings,
 		missing: collected.missing,
 		timedOut: collected.timedOut,
 		elapsedMs: collected.elapsedMs,
 		startErrors: [...startErrors],
+		panes: [...panes.entries()].map(([agentName, info]) => ({ agentName, ...info })),
 	};
+}
+
+function collectedCleanly(collected) {
+	return Boolean(collected) && collected.missing.length === 0;
 }
