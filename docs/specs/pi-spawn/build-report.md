@@ -12,7 +12,7 @@
 | T-2 | done | `83c7005` | AC-2, AC-7 | parseSpawnArgs + assertConfirmed |
 | T-3 | done | `c6780ed` | AC-3, AC-4 | chooseRuntime + buildChildLaunch |
 | T-4 | done | `767283f` | AC-5, AC-6 | await/collect/cleanup |
-| T-5 | done | pending | AC-7, AC-8, AC-9, AC-10 | extension + skill + monorepo wiring |
+| T-5 | done | `ce9f0cf` | AC-7, AC-8, AC-9, AC-10 | extension + skill + monorepo wiring |
 
 ## Deviations
 
@@ -88,7 +88,7 @@ npm notice name: @smarzban/pi-spawn
 pack_rc=0
 ```
 
-### T-5 (@ `pending`)
+### T-5 (@ `ce9f0cf`)
 
 ```
 $ cd packages/pi-spawn && node --test; echo test_rc=$?
