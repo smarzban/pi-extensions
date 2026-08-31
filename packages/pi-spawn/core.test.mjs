@@ -554,6 +554,83 @@ test("executeSpawnRun records startErrors when a runner rejects", async () => {
 	await rm(root, { recursive: true, force: true });
 });
 
+test("awaitAndCollect ignores in-progress finding until child is settled", async () => {
+	const root = await tempDir("pi-spawn-partial-");
+	const run = await createRunDir({ runId: "partial", baseDir: root });
+	const path = findingPathFor(run.runDir, "opus");
+	await writeFile(path, "partial");
+	let settled = false;
+	setTimeout(() => {
+		settled = true;
+	}, 40);
+	const result = await awaitAndCollect({
+		runDir: run.runDir,
+		agents: [{ name: "opus", findingPath: path }],
+		timeoutMs: 500,
+		pollMs: 10,
+		isSettled: () => settled,
+	});
+	assert.equal(result.findings.length, 1);
+	assert.equal(result.findings[0].content, "partial");
+	assert.ok(result.elapsedMs >= 40);
+	await rm(root, { recursive: true, force: true });
+});
+
+test("awaitAndCollect does not accept partial finding on timeout while unsettled", async () => {
+	const root = await tempDir("pi-spawn-partial-to-");
+	const run = await createRunDir({ runId: "partial-to", baseDir: root });
+	const path = findingPathFor(run.runDir, "opus");
+	await writeFile(path, "still writing");
+	const result = await awaitAndCollect({
+		runDir: run.runDir,
+		agents: [{ name: "opus", findingPath: path }],
+		timeoutMs: 40,
+		pollMs: 10,
+		isSettled: () => false,
+	});
+	assert.equal(result.findings.length, 0);
+	assert.equal(result.missing[0].reason, "timeout");
+	await rm(root, { recursive: true, force: true });
+});
+
+test("readFindingFile classifies read failures instead of throwing", async () => {
+	const result = await readFindingFile("/tmp/whatever.md", {
+		lstat: async () => ({
+			isSymbolicLink: () => false,
+			isFIFO: () => false,
+			isSocket: () => false,
+			isDirectory: () => false,
+			isFile: () => true,
+			size: 12,
+		}),
+		readFile: async () => {
+			const err = new Error("denied");
+			err.code = "EACCES";
+			throw err;
+		},
+	});
+	assert.equal(result.ok, false);
+	assert.equal(result.reason, "unreadable");
+});
+
+test("runCommand escalates SIGTERM to SIGKILL and waits for close", async () => {
+	const { runCommand } = await import("./runners.mjs");
+	const script = `
+process.on("SIGTERM", () => {});
+setInterval(() => {}, 1000);
+`;
+	const started = Date.now();
+	await assert.rejects(
+		() =>
+			runCommand(process.execPath, ["-e", script], {
+				timeoutMs: 50,
+				killGraceMs: 30,
+			}),
+		/timed out/i,
+	);
+	assert.ok(Date.now() - started < 2_000);
+});
+
 test("package.json declares spawn extension and skills", async () => {
 	const pkgPath = join(dirname(fileURLToPath(import.meta.url)), "package.json");
 	const pkg = JSON.parse(await readFile(pkgPath, "utf8"));
@@ -580,12 +657,23 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 	};
 	const dir = await tempDir("pi-spawn-install-");
 	await writeFile(join(dir, "spawn.json"), JSON.stringify(fixtureConfig, null, 2));
+	let sawCwd;
+	let sawHerdr;
 	installSpawn(pi, {
 		configPath: join(dir, "spawn.json"),
-		runHeadless: async () => {},
-		runHerdr: async () => {},
+		runHeadless: async () => {
+			throw new Error("should use herdr");
+		},
+		runHerdr: async (launch) => {
+			sawCwd = launch.cwd;
+			await writeFile(launch.findingPath, "ok\n");
+		},
 		baseDir: dir,
-		getHerdrEnv: () => undefined,
+		getCwd: () => "/session/cwd",
+		getHerdrEnv: () => {
+			sawHerdr = "1";
+			return "1";
+		},
 	});
 	assert.ok(commands.has("spawn"));
 	assert.ok(tools.has("spawn_run"));
@@ -594,6 +682,18 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 	assert.ok(messages.some((m) => /look into/i.test(m.content)));
 	await commands.get("spawn").handler("opus on this", { ui: { notify() {} } });
 	assert.ok(messages.some((m) => /opus/i.test(m.content) && /confirm/i.test(m.content)));
+
+	const toolResult = await tools.get("spawn_run").execute(
+		"id1",
+		{ brief: "look into auth", confirmed: true, names: ["opus"], useDefaultSet: false },
+		undefined,
+		undefined,
+		{ cwd: "/ignored" },
+	);
+	assert.match(toolResult.content[0].text, /opus/i);
+	assert.equal(sawCwd, "/session/cwd");
+	assert.equal(sawHerdr, "1");
+	assert.equal(toolResult.details.runtime, "herdr");
 	await rm(dir, { recursive: true, force: true });
 });
 
@@ -601,11 +701,17 @@ test("index.ts wires installSpawn to register spawn command and tool", async () 
 	const src = await readFile(join(dirname(fileURLToPath(import.meta.url)), "index.ts"), "utf8");
 	assert.match(src, /export function installSpawn/);
 	assert.match(src, /installSpawnCore/);
+	assert.match(src, /getAgentDir\(\)/);
+	assert.match(src, /defaultRunHeadless/);
+	assert.match(src, /defaultRunHerdr/);
 	assert.match(src, /Type\.Object/);
 	assert.match(src, /export default function/);
+	assert.match(src, /deps\.configPath \?\? join\(getAgentDir\(\), "spawn\.json"\)/);
 	const installSrc = await readFile(join(dirname(fileURLToPath(import.meta.url)), "install.mjs"), "utf8");
 	assert.match(installSrc, /pi\.registerCommand\(SPAWN_COMMAND/);
 	assert.match(installSrc, /pi\.registerTool\(\{[\s\S]*name:\s*SPAWN_TOOL/);
 	assert.match(installSrc, /executeSpawnRun\(plan[\s\S]*signal/);
 	assert.match(installSrc, /formatSpawnResult\(result\)/);
+	assert.match(installSrc, /getCwd\(ctx\)/);
+	assert.match(installSrc, /getHerdrEnv\(\)/);
 });

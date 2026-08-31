@@ -219,8 +219,9 @@ export function buildFindingPrompt({ brief, findingPath, agentName }) {
 	return [
 		`You are spawned agent "${agentName}" working the same confirmed brief as sibling agents.`,
 		"Answer the brief thoroughly using your normal Pi tools.",
-		"When finished, write your complete finding as Markdown to this exact path (overwrite if needed):",
+	"When finished, write your complete finding as Markdown to this exact path (overwrite if needed):",
 		findingPath,
+		"Prefer writing to a sibling temp file then renaming onto that path so the file appears atomically.",
 		"Do not ask the parent for confirmation. Do not spawn further agents.",
 		"",
 		"## Confirmed brief",
@@ -354,8 +355,15 @@ export async function readFindingFile(path, deps = {}) {
 	if (typeof st.size === "number" && st.size > maxBytes) {
 		return { ok: false, reason: "too-large" };
 	}
-	const content = await read(path, "utf8");
-	return { ok: true, content };
+	try {
+		const content = await read(path, "utf8");
+		return { ok: true, content };
+	} catch (err) {
+		const code = err?.code;
+		if (code === "ENOENT") return { ok: false, reason: "missing" };
+		if (code === "EACCES" || code === "EPERM") return { ok: false, reason: "unreadable" };
+		return { ok: false, reason: `read-error:${code || err?.message || "unknown"}` };
+	}
 }
 
 /**
@@ -401,6 +409,12 @@ export async function awaitAndCollect(input) {
 
 	while (pending.size > 0 && now() - started < timeoutMs) {
 		for (const [name, agent] of [...pending.entries()]) {
+			const settled = Boolean(isSettled?.(name));
+			// When an isSettled hook is provided, never accept a finding until the
+			// child has exited — avoids capturing a partially written file.
+			if (typeof isSettled === "function" && !settled) {
+				continue;
+			}
 			const read = await readFinding(agent.findingPath);
 			if (read.ok) {
 				findings.push({ agentName: name, findingPath: agent.findingPath, content: read.content });
@@ -416,7 +430,7 @@ export async function awaitAndCollect(input) {
 				pending.delete(name);
 				continue;
 			}
-			if (isSettled?.(name)) {
+			if (settled) {
 				missing.push({
 					agentName: name,
 					findingPath: agent.findingPath,
@@ -433,6 +447,10 @@ export async function awaitAndCollect(input) {
 
 	// Final pass so findings written during the last sleep are not missed.
 	for (const [name, agent] of [...pending.entries()]) {
+		const hasSettledHook = typeof isSettled === "function";
+		const settled = hasSettledHook ? Boolean(isSettled(name)) : false;
+		if (hasSettledHook && !settled) continue;
+
 		const read = await readFinding(agent.findingPath);
 		if (read.ok) {
 			findings.push({ agentName: name, findingPath: agent.findingPath, content: read.content });
@@ -448,7 +466,7 @@ export async function awaitAndCollect(input) {
 			pending.delete(name);
 			continue;
 		}
-		if (isSettled?.(name)) {
+		if (hasSettledHook && settled) {
 			missing.push({
 				agentName: name,
 				findingPath: agent.findingPath,
@@ -456,6 +474,7 @@ export async function awaitAndCollect(input) {
 			});
 			pending.delete(name);
 		}
+		// Unsettled or no hook + still missing → timeout below.
 	}
 
 	for (const agent of pending.values()) {

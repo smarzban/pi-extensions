@@ -4,10 +4,35 @@ import { spawn } from "node:child_process";
  * @typedef {{ stdout: string, stderr: string, code: number }} ExecResult
  */
 
+const DEFAULT_KILL_GRACE_MS = 2_000;
+
+function killProcessTree(child, signal) {
+	if (!child?.pid) return;
+	try {
+		if (process.platform !== "win32") {
+			process.kill(-child.pid, signal);
+			return;
+		}
+	} catch {
+		/* fall through to direct kill */
+	}
+	try {
+		child.kill(signal);
+	} catch {
+		/* already dead */
+	}
+}
+
 /**
  * @param {string} command
  * @param {string[]} args
- * @param {{ cwd?: string, env?: NodeJS.ProcessEnv, timeoutMs?: number, signal?: AbortSignal }} [options]
+ * @param {{
+ *   cwd?: string,
+ *   env?: NodeJS.ProcessEnv,
+ *   timeoutMs?: number,
+ *   signal?: AbortSignal,
+ *   killGraceMs?: number,
+ * }} [options]
  * @returns {Promise<ExecResult>}
  */
 export function runCommand(command, args, options = {}) {
@@ -20,29 +45,53 @@ export function runCommand(command, args, options = {}) {
 			cwd: options.cwd,
 			env: options.env ?? process.env,
 			stdio: ["ignore", "pipe", "pipe"],
+			detached: process.platform !== "win32",
 		});
 		let stdout = "";
 		let stderr = "";
 		let settled = false;
+		let stopping = false;
+		let stopReason = "";
+		let killEscalation;
+		let hardDeadline;
+		const graceMs =
+			Number.isFinite(options.killGraceMs) && options.killGraceMs >= 0
+				? options.killGraceMs
+				: DEFAULT_KILL_GRACE_MS;
+
 		const finish = (fn) => {
 			if (settled) return;
 			settled = true;
 			if (timer) clearTimeout(timer);
+			if (killEscalation) clearTimeout(killEscalation);
+			if (hardDeadline) clearTimeout(hardDeadline);
 			options.signal?.removeEventListener("abort", onAbort);
 			fn();
 		};
+
+		const forceStop = (reason) => {
+			if (settled || stopping) return;
+			stopping = true;
+			stopReason = reason;
+			killProcessTree(child, "SIGTERM");
+			killEscalation = setTimeout(() => {
+				killProcessTree(child, "SIGKILL");
+			}, graceMs);
+			// If the process ignores both signals, still settle so callers are not stuck.
+			hardDeadline = setTimeout(() => {
+				finish(() => reject(new Error(stopReason)));
+			}, graceMs * 2 + 50);
+		};
+
 		const timer =
 			options.timeoutMs && options.timeoutMs > 0
 				? setTimeout(() => {
-						child.kill("SIGTERM");
-						finish(() =>
-							reject(new Error(`${command} timed out after ${options.timeoutMs}ms`)),
-						);
+						forceStop(`${command} timed out after ${options.timeoutMs}ms`);
 					}, options.timeoutMs)
 				: undefined;
+
 		const onAbort = () => {
-			child.kill("SIGTERM");
-			finish(() => reject(new Error(`${command} aborted`)));
+			forceStop(`${command} aborted`);
 		};
 		options.signal?.addEventListener("abort", onAbort, { once: true });
 		child.stdout.on("data", (chunk) => {
@@ -55,6 +104,10 @@ export function runCommand(command, args, options = {}) {
 			finish(() => reject(err));
 		});
 		child.on("close", (code) => {
+			if (stopping) {
+				finish(() => reject(new Error(stopReason)));
+				return;
+			}
 			finish(() => resolve({ stdout, stderr, code: code ?? 1 }));
 		});
 	});
