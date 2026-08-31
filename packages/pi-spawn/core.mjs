@@ -582,7 +582,7 @@ export async function executeSpawnRun(plan, deps = {}) {
 	const makeDir = deps.mkdir ?? mkdir;
 	const runHeadless = deps.runHeadless;
 	const runHerdr = deps.runHerdr;
-	const signal = deps.signal;
+	const outerSignal = deps.signal;
 
 	await makeDir(plan.runDir, { recursive: true, mode: 0o700 });
 
@@ -591,7 +591,13 @@ export async function executeSpawnRun(plan, deps = {}) {
 	/** @type {Array<{ agentName: string, error: string }>} */
 	const startErrors = [];
 
-	const runnerOpts = { timeoutMs: plan.timeoutMs, signal };
+	const ac = new AbortController();
+	const onOuterAbort = () => ac.abort();
+	if (outerSignal) {
+		if (outerSignal.aborted) ac.abort();
+		else outerSignal.addEventListener("abort", onOuterAbort, { once: true });
+	}
+	const runnerOpts = { timeoutMs: plan.timeoutMs, signal: ac.signal };
 
 	const starters = plan.launches.map(async (launch) => {
 		try {
@@ -603,19 +609,20 @@ export async function executeSpawnRun(plan, deps = {}) {
 				await runHeadless(launch, runnerOpts);
 			}
 			settled.set(launch.agentName, {});
+			return { agentName: launch.agentName, ok: true };
 		} catch (err) {
 			const error = String(err?.message || err);
 			settled.set(launch.agentName, { error });
 			startErrors.push({ agentName: launch.agentName, error });
-			throw err;
+			return { agentName: launch.agentName, ok: false, error };
 		}
 	});
+	// Attach immediately so early runner rejections are not unhandled.
+	const startersSettled = Promise.allSettled(starters);
 
-	// Fire starters; do not await them before collect — timeout must bound the run.
-	void Promise.allSettled(starters);
-
+	let collected;
 	try {
-		const collected = await collect({
+		collected = await collect({
 			runDir: plan.runDir,
 			agents: plan.launches.map((l) => ({ name: l.agentName, findingPath: l.findingPath })),
 			timeoutMs: plan.timeoutMs,
@@ -626,17 +633,20 @@ export async function executeSpawnRun(plan, deps = {}) {
 				return entry.error ? `start-error: ${entry.error}` : "no-finding";
 			},
 		});
-
-		return {
-			brief: plan.brief,
-			runtime: plan.runtime,
-			findings: collected.findings,
-			missing: collected.missing,
-			timedOut: collected.timedOut,
-			elapsedMs: collected.elapsedMs,
-			startErrors,
-		};
 	} finally {
+		ac.abort();
+		if (outerSignal) outerSignal.removeEventListener("abort", onOuterAbort);
+		await startersSettled;
 		await cleanup(plan.runDir);
 	}
+
+	return {
+		brief: plan.brief,
+		runtime: plan.runtime,
+		findings: collected.findings,
+		missing: collected.missing,
+		timedOut: collected.timedOut,
+		elapsedMs: collected.elapsedMs,
+		startErrors: [...startErrors],
+	};
 }

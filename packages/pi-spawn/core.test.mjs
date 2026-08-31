@@ -453,13 +453,21 @@ test("executeSpawnRun times out without waiting forever for hung runner", async 
 	const seen = [];
 	const started = Date.now();
 	const result = await executeSpawnRun(plan, {
-		runHeadless: async (launch) => {
+		runHeadless: async (launch, opts = {}) => {
 			seen.push(launch.agentName);
 			if (launch.agentName === "opus") {
 				await writeFile(launch.findingPath, "opus ok\n");
 				return;
 			}
-			await new Promise(() => {});
+			await new Promise((_, reject) => {
+				if (opts.signal?.aborted) {
+					reject(new Error("aborted"));
+					return;
+				}
+				opts.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+					once: true,
+				});
+			});
 		},
 		cleanupRunDir: async (dir) => {
 			cleaned = true;
@@ -554,12 +562,50 @@ test("package.json declares spawn extension and skills", async () => {
 	assert.deepEqual(pkg.pi.skills, ["./skills"]);
 });
 
+test("installSpawn registers /spawn command and spawn_run tool", async () => {
+	const { installSpawn } = await import("./install.mjs");
+	const commands = new Map();
+	const tools = new Map();
+	const messages = [];
+	const pi = {
+		registerCommand(name, opts) {
+			commands.set(name, opts);
+		},
+		registerTool(def) {
+			tools.set(def.name, def);
+		},
+		async sendMessage(msg) {
+			messages.push(msg);
+		},
+	};
+	const dir = await tempDir("pi-spawn-install-");
+	await writeFile(join(dir, "spawn.json"), JSON.stringify(fixtureConfig, null, 2));
+	installSpawn(pi, {
+		configPath: join(dir, "spawn.json"),
+		runHeadless: async () => {},
+		runHerdr: async () => {},
+		baseDir: dir,
+		getHerdrEnv: () => undefined,
+	});
+	assert.ok(commands.has("spawn"));
+	assert.ok(tools.has("spawn_run"));
+	assert.equal(tools.get("spawn_run").name, "spawn_run");
+	await commands.get("spawn").handler("", { ui: { notify() {} } });
+	assert.ok(messages.some((m) => /look into/i.test(m.content)));
+	await commands.get("spawn").handler("opus on this", { ui: { notify() {} } });
+	assert.ok(messages.some((m) => /opus/i.test(m.content) && /confirm/i.test(m.content)));
+	await rm(dir, { recursive: true, force: true });
+});
+
 test("index.ts wires installSpawn to register spawn command and tool", async () => {
 	const src = await readFile(join(dirname(fileURLToPath(import.meta.url)), "index.ts"), "utf8");
 	assert.match(src, /export function installSpawn/);
-	assert.match(src, /pi\.registerCommand\(SPAWN_COMMAND/);
-	assert.match(src, /pi\.registerTool\(\{[\s\S]*name:\s*SPAWN_TOOL/);
-	assert.match(src, /executeSpawnRun\(plan[\s\S]*signal/);
-	assert.match(src, /formatSpawnResult\(result\)/);
+	assert.match(src, /installSpawnCore/);
+	assert.match(src, /Type\.Object/);
 	assert.match(src, /export default function/);
+	const installSrc = await readFile(join(dirname(fileURLToPath(import.meta.url)), "install.mjs"), "utf8");
+	assert.match(installSrc, /pi\.registerCommand\(SPAWN_COMMAND/);
+	assert.match(installSrc, /pi\.registerTool\(\{[\s\S]*name:\s*SPAWN_TOOL/);
+	assert.match(installSrc, /executeSpawnRun\(plan[\s\S]*signal/);
+	assert.match(installSrc, /formatSpawnResult\(result\)/);
 });

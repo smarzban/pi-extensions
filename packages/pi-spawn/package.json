@@ -27,6 +27,8 @@
 	"files": [
 		"index.ts",
 		"core.mjs",
+		"install.mjs",
+		"runners.mjs",
 		"skills",
 		"README.md",
 		"LICENSE"
