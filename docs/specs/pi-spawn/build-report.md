@@ -10,8 +10,8 @@
 |------|--------|--------|-------------|-------|
 | T-1 | done | `8a7af58` | AC-1 | Config load + resolveAgents |
 | T-2 | done | `83c7005` | AC-2, AC-7 | parseSpawnArgs + assertConfirmed |
-| T-3 | done | pending | AC-3, AC-4 | chooseRuntime + buildChildLaunch |
-| T-4 | pending | — | AC-5, AC-6 | |
+| T-3 | done | `c6780ed` | AC-3, AC-4 | chooseRuntime + buildChildLaunch |
+| T-4 | done | pending | AC-5, AC-6 | await/collect/cleanup |
 | T-5 | pending | — | AC-7, AC-8, AC-9, AC-10 | |
 
 ## Deviations
@@ -57,7 +57,7 @@ npm notice name: @smarzban/pi-spawn
 pack_rc=0
 ```
 
-### T-3 (@ `pending`)
+### T-3 (@ `c6780ed`)
 
 ```
 $ cd packages/pi-spawn && node --test; echo test_rc=$?
@@ -67,6 +67,20 @@ $ cd packages/pi-spawn && node --test; echo test_rc=$?
 ✔ buildChildLaunch includes cwd model thinking tools brief and finding path
 ✔ buildChildLaunch herdr plan names tab and pi kind
 ℹ tests 15 / pass 15 / fail 0
+test_rc=0
+
+$ cd packages/pi-spawn && npm pack --dry-run; echo pack_rc=$?
+npm notice name: @smarzban/pi-spawn
+pack_rc=0
+```
+
+### T-4 (@ `pending`)
+
+```
+$ cd packages/pi-spawn && node --test; echo test_rc=$?
+✔ awaitAndCollect returns finished findings and marks missing after timeout
+✔ cleanupRunDir deletes temp findings after collect
+ℹ tests 17 / pass 17 / fail 0
 test_rc=0
 
 $ cd packages/pi-spawn && npm pack --dry-run; echo pack_rc=$?

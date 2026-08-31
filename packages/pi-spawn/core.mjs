@@ -1,4 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { readFile, mkdir, rm, access } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
@@ -285,4 +287,123 @@ export function buildChildLaunch(input) {
 		argv: headlessArgv,
 		herdr,
 	};
+}
+
+/**
+ * @param {{ runId: string, baseDir?: string, mkdir?: typeof mkdir }} input
+ */
+export async function createRunDir(input) {
+	const runId = String(input.runId || "").trim();
+	if (!runId) throw new Error("createRunDir requires runId");
+	const base = input.baseDir ?? tmpdir();
+	const runDir = join(base, `pi-spawn-${runId}`);
+	const make = input.mkdir ?? mkdir;
+	await make(runDir, { recursive: true });
+	return { runId, runDir };
+}
+
+/** @param {string} runDir @param {string} agentName */
+export function findingPathFor(runDir, agentName) {
+	const safe = String(agentName).replace(/[^a-zA-Z0-9._-]+/g, "_");
+	return join(runDir, `${safe}.md`);
+}
+
+function sleep(ms, deps = {}) {
+	const wait = deps.sleep ?? ((n) => new Promise((resolve) => setTimeout(resolve, n)));
+	return wait(ms);
+}
+
+async function fileExists(path, deps = {}) {
+	const probe = deps.access ?? access;
+	try {
+		await probe(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Wait until timeout (or all findings present), then return finished + missing.
+ * Injectable waitFor/readFile/now/sleep for unit tests (no live children).
+ * @param {{
+ *   runDir: string,
+ *   agents: Array<{ name: string, findingPath: string }>,
+ *   timeoutMs: number,
+ *   pollMs?: number,
+ *   waitFor?: (agent: { name: string, findingPath: string }) => Promise<{ done?: boolean }>,
+ *   readFile?: typeof readFile,
+ *   now?: () => number,
+ *   sleep?: (ms: number) => Promise<void>,
+ *   access?: typeof access,
+ * }} input
+ */
+export async function awaitAndCollect(input) {
+	const {
+		runDir,
+		agents,
+		timeoutMs,
+		pollMs = 250,
+		waitFor,
+		readFile: read = readFile,
+		now = Date.now,
+	} = input;
+	if (!runDir) throw new Error("awaitAndCollect requires runDir");
+	if (!Array.isArray(agents) || agents.length === 0) {
+		throw new Error("awaitAndCollect requires agents");
+	}
+	if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+		throw new Error("awaitAndCollect requires positive timeoutMs");
+	}
+
+	const started = now();
+	const pending = new Map(agents.map((a) => [a.name, a]));
+	/** @type {Array<{ agentName: string, findingPath: string, content: string }>} */
+	const findings = [];
+
+	while (pending.size > 0 && now() - started < timeoutMs) {
+		for (const [name, agent] of [...pending.entries()]) {
+			if (waitFor) {
+				try {
+					await waitFor(agent);
+				} catch {
+					/* keep waiting until timeout; failures surface as missing */
+				}
+			}
+			if (await fileExists(agent.findingPath, input)) {
+				const content = await read(agent.findingPath, "utf8");
+				findings.push({ agentName: name, findingPath: agent.findingPath, content });
+				pending.delete(name);
+			}
+		}
+		if (pending.size === 0) break;
+		const remaining = timeoutMs - (now() - started);
+		if (remaining <= 0) break;
+		await sleep(Math.min(pollMs, remaining), input);
+	}
+
+	const missing = [...pending.values()].map((agent) => ({
+		agentName: agent.name,
+		findingPath: agent.findingPath,
+		reason: "timeout",
+	}));
+
+	return {
+		runDir,
+		findings,
+		missing,
+		timedOut: missing.length > 0,
+		elapsedMs: now() - started,
+	};
+}
+
+/**
+ * Delete the temp run directory after collect (success or partial).
+ * @param {string} runDir
+ * @param {{ rm?: typeof rm }} [deps]
+ */
+export async function cleanupRunDir(runDir, deps = {}) {
+	if (!runDir) throw new Error("cleanupRunDir requires runDir");
+	const remove = deps.rm ?? rm;
+	await remove(runDir, { recursive: true, force: true });
 }

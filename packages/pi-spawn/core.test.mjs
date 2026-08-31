@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, access, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadSpawnConfig, resolveAgents, parseSpawnArgs, assertConfirmed, chooseRuntime, buildChildLaunch } from "./core.mjs";
+import { loadSpawnConfig, resolveAgents, parseSpawnArgs, assertConfirmed, chooseRuntime, buildChildLaunch, createRunDir, awaitAndCollect, cleanupRunDir, findingPathFor } from "./core.mjs";
 
 const fixtureConfig = {
 	agents: {
@@ -154,4 +154,51 @@ test("buildChildLaunch herdr plan names tab and pi kind", () => {
 	assert.equal(launch.herdr.agentLabel, "fable");
 	assert.ok(launch.herdr.tabLabel.includes("fable"));
 	assert.deepEqual(launch.herdr.agentArgs.slice(0, 4), ["--model", "openai/gpt-5", "--thinking", "medium"]);
+});
+
+test("awaitAndCollect returns finished findings and marks missing after timeout", async () => {
+	const root = await tempDir("pi-spawn-await-");
+	const run = await createRunDir({ runId: "run1", baseDir: root });
+	const opusPath = findingPathFor(run.runDir, "opus");
+	const fablePath = findingPathFor(run.runDir, "fable");
+	await writeFile(opusPath, "# opus finding\nok\n");
+
+	let polls = 0;
+	const result = await awaitAndCollect({
+		runDir: run.runDir,
+		agents: [
+			{ name: "opus", findingPath: opusPath },
+			{ name: "fable", findingPath: fablePath },
+		],
+		timeoutMs: 50,
+		pollMs: 10,
+		waitFor: async () => {
+			polls += 1;
+			return { done: false };
+		},
+	});
+
+	assert.equal(result.timedOut, true);
+	assert.equal(result.findings.length, 1);
+	assert.equal(result.findings[0].agentName, "opus");
+	assert.match(result.findings[0].content, /opus finding/);
+	assert.deepEqual(
+		result.missing.map((m) => m.agentName),
+		["fable"],
+	);
+	assert.ok(polls >= 1);
+	await rm(root, { recursive: true, force: true });
+});
+
+test("cleanupRunDir deletes temp findings after collect", async () => {
+	const root = await tempDir("pi-spawn-clean-");
+	const run = await createRunDir({ runId: "run2", baseDir: root });
+	const path = findingPathFor(run.runDir, "opus");
+	await writeFile(path, "done\n");
+	await access(run.runDir);
+
+	await cleanupRunDir(run.runDir);
+
+	await assert.rejects(() => access(run.runDir), /ENOENT/);
+	await rm(root, { recursive: true, force: true });
 });
