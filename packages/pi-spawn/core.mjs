@@ -675,6 +675,12 @@ export async function executeSpawnRun(plan, deps = {}) {
 		const opts = {
 			...runnerOpts,
 			onStarted: (info) => panes.set(launch.agentName, { ...info }),
+			onAgentRunning: (info) =>
+				panes.set(launch.agentName, {
+					...(panes.get(launch.agentName) ?? {}),
+					...info,
+					running: true,
+				}),
 		};
 		try {
 			if (launch.runtime === "herdr") {

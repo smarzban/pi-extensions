@@ -133,6 +133,99 @@ export async function defaultRunHeadless(launch, opts = {}) {
 	});
 }
 
+const DEFAULT_START_RETRY_MS = 200;
+const DEFAULT_START_BUDGET_MS = 60_000;
+
+function isAgentPaneBusy(stderr = "", stdout = "") {
+	const text = `${stderr}\n${stdout}`;
+	return text.includes("agent_pane_busy") || /not an available shell/i.test(text);
+}
+
+function sleep(ms, signal, sleepFn) {
+	if (signal?.aborted) return Promise.reject(new Error("herdr aborted"));
+	if (sleepFn) return Promise.resolve(sleepFn(ms));
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			signal?.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		const onAbort = () => {
+			clearTimeout(timer);
+			reject(new Error("herdr aborted"));
+		};
+		signal?.addEventListener("abort", onAbort, { once: true });
+	});
+}
+
+/**
+ * Start a Herdr agent in a freshly created tab, retrying when Herdr reports the
+ * pane is not yet an available shell (common under parallel tab create).
+ */
+export async function startHerdrAgentWithRetry(launch, paneId, opts = {}) {
+	const run = opts.runCommand ?? runCommand;
+	const timeoutMs = opts.timeoutMs ?? launch.herdr.timeoutMs ?? launch.timeoutMs ?? 300_000;
+	const budgetMs =
+		Number.isFinite(opts.startBudgetMs) && opts.startBudgetMs > 0
+			? opts.startBudgetMs
+			: Math.min(timeoutMs, DEFAULT_START_BUDGET_MS);
+	const retryMs =
+		Number.isFinite(opts.startRetryMs) && opts.startRetryMs >= 0
+			? opts.startRetryMs
+			: DEFAULT_START_RETRY_MS;
+	const startedAt = Date.now();
+	let lastErr = "";
+	let attempts = 0;
+
+	while (Date.now() - startedAt < budgetMs) {
+		if (opts.signal?.aborted) throw new Error("herdr agent start aborted");
+		attempts += 1;
+		const remaining = Math.max(1_000, budgetMs - (Date.now() - startedAt));
+		const started = await run(
+			"herdr",
+			[
+				"agent",
+				"start",
+				launch.herdr.agentLabel,
+				"--kind",
+				launch.herdr.kind,
+				"--pane",
+				paneId,
+				"--timeout",
+				String(Math.min(remaining, 30_000)),
+				"--",
+				...launch.herdr.agentArgs,
+			],
+			{ timeoutMs: Math.min(remaining + 5_000, 60_000), signal: opts.signal },
+		);
+		if (started.code === 0) {
+			const payload = parseJsonLine(started.stdout);
+			const agent = payload?.result?.agent?.agent ?? payload?.result?.agent;
+			const detected =
+				typeof agent === "string"
+					? agent
+					: agent && typeof agent === "object"
+						? agent.agent
+						: undefined;
+			if (!detected) {
+				throw new Error(
+					`herdr agent start returned success but no agent was detected in pane ${paneId}`,
+				);
+			}
+			return { attempts, agent: detected, raw: payload };
+		}
+
+		lastErr = started.stderr || started.stdout || `exit ${started.code}`;
+		if (!isAgentPaneBusy(started.stderr, started.stdout)) {
+			throw new Error(`herdr agent start failed: ${lastErr}`);
+		}
+		await sleep(retryMs, opts.signal, opts.sleep);
+	}
+
+	throw new Error(
+		`herdr agent start failed after ${attempts} attempt(s): pane ${paneId} never became an available shell (${lastErr})`,
+	);
+}
+
 export async function defaultRunHerdr(launch, opts = {}) {
 	const timeoutMs = opts.timeoutMs ?? launch.herdr.timeoutMs ?? launch.timeoutMs ?? 300_000;
 	const run = opts.runCommand ?? runCommand;
@@ -150,26 +243,12 @@ export async function defaultRunHerdr(launch, opts = {}) {
 	const paneId = payload?.result?.root_pane?.pane_id;
 	const tabId = payload?.result?.tab?.tab_id ?? payload?.result?.root_pane?.tab_id;
 	if (!paneId) throw new Error("herdr tab create did not return pane_id");
+	// Record pane/tab as soon as the tab exists so the parent can inspect
+	// stragglers even if start later fails.
 	opts.onStarted?.({ paneId, tabId });
 
-	const started = await run(
-		"herdr",
-		[
-			"agent",
-			"start",
-			launch.herdr.agentLabel,
-			"--kind",
-			launch.herdr.kind,
-			"--pane",
-			paneId,
-			"--",
-			...launch.herdr.agentArgs,
-		],
-		{ timeoutMs: Math.min(timeoutMs, 60_000), signal: opts.signal },
-	);
-	if (started.code !== 0) {
-		throw new Error(`herdr agent start failed: ${started.stderr || started.stdout}`);
-	}
+	const started = await startHerdrAgentWithRetry(launch, paneId, opts);
+	opts.onAgentRunning?.({ paneId, tabId, agent: started.agent, attempts: started.attempts });
 
 	const prompted = await run(
 		"herdr",
@@ -191,5 +270,5 @@ export async function defaultRunHerdr(launch, opts = {}) {
 	if (prompted.code !== 0) {
 		throw new Error(`herdr agent prompt failed: ${prompted.stderr || prompted.stdout}`);
 	}
-	return { paneId, tabId };
+	return { paneId, tabId, agent: started.agent, startAttempts: started.attempts };
 }

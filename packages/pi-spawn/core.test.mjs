@@ -789,6 +789,7 @@ test("defaultRunHerdr creates tab, starts agent, prompts with timeout, never clo
 	const { defaultRunHerdr } = await import("./runners.mjs");
 	const calls = [];
 	let startedInfo;
+	let runningInfo;
 	const result = await defaultRunHerdr(
 		{
 			cwd: "/work",
@@ -805,6 +806,9 @@ test("defaultRunHerdr creates tab, starts agent, prompts with timeout, never clo
 			onStarted: (info) => {
 				startedInfo = info;
 			},
+			onAgentRunning: (info) => {
+				runningInfo = info;
+			},
 			runCommand: async (cmd, args, options) => {
 				calls.push({ cmd, args, options });
 				if (args[0] === "tab" && args[1] === "create") {
@@ -816,19 +820,133 @@ test("defaultRunHerdr creates tab, starts agent, prompts with timeout, never clo
 						code: 0,
 					};
 				}
+				if (args[0] === "agent" && args[1] === "start") {
+					return {
+						stdout: JSON.stringify({
+							result: { agent: { agent: "pi", name: "opus", pane_id: "pane-1" } },
+							type: "agent_started",
+						}),
+						stderr: "",
+						code: 0,
+					};
+				}
 				return { stdout: "{}", stderr: "", code: 0 };
 			},
 		},
 	);
-	assert.deepEqual(result, { paneId: "pane-1", tabId: "tab-1" });
+	assert.deepEqual(result, { paneId: "pane-1", tabId: "tab-1", agent: "pi", startAttempts: 1 });
 	assert.deepEqual(startedInfo, { paneId: "pane-1", tabId: "tab-1" });
+	assert.deepEqual(runningInfo, { paneId: "pane-1", tabId: "tab-1", agent: "pi", attempts: 1 });
 	assert.equal(calls.length, 3);
 	assert.deepEqual(calls[0].args.slice(0, 2), ["tab", "create"]);
 	assert.ok(calls[0].args.includes("/work"));
 	assert.deepEqual(calls[1].args.slice(0, 3), ["agent", "start", "opus"]);
+	assert.ok(calls[1].args.includes("--timeout"));
 	assert.ok(calls[2].args.includes("--timeout"));
 	assert.ok(calls[2].args.includes("1000"));
 	assert.ok(!calls.some((c) => c.args.includes("close")));
+});
+
+test("defaultRunHerdr retries agent start when pane is not yet an available shell", async () => {
+	const { defaultRunHerdr } = await import("./runners.mjs");
+	const starts = [];
+	let sleeps = 0;
+	const result = await defaultRunHerdr(
+		{
+			cwd: "/work",
+			herdr: {
+				kind: "pi",
+				agentLabel: "sol",
+				tabLabel: "spawn:sol",
+				agentArgs: ["--model", "m"],
+				prompt: "brief",
+				timeoutMs: 5_000,
+			},
+		},
+		{
+			startRetryMs: 1,
+			startBudgetMs: 5_000,
+			sleep: async () => {
+				sleeps += 1;
+			},
+			runCommand: async (_cmd, args) => {
+				if (args[0] === "tab" && args[1] === "create") {
+					return {
+						stdout: JSON.stringify({
+							result: { root_pane: { pane_id: "pane-busy", tab_id: "tab-busy" }, tab: { tab_id: "tab-busy" } },
+						}),
+						stderr: "",
+						code: 0,
+					};
+				}
+				if (args[0] === "agent" && args[1] === "start") {
+					starts.push(args);
+					if (starts.length < 3) {
+						return {
+							stdout: "",
+							stderr: JSON.stringify({
+								error: {
+									code: "agent_pane_busy",
+									message: "agent target pane pane-busy is not an available shell",
+								},
+								id: "cli:agent:start",
+							}),
+							code: 1,
+						};
+					}
+					return {
+						stdout: JSON.stringify({
+							result: { agent: { agent: "pi", name: "sol", pane_id: "pane-busy" } },
+							type: "agent_started",
+						}),
+						stderr: "",
+						code: 0,
+					};
+				}
+				return { stdout: "{}", stderr: "", code: 0 };
+			},
+		},
+	);
+	assert.equal(result.paneId, "pane-busy");
+	assert.equal(result.agent, "pi");
+	assert.equal(result.startAttempts, 3);
+	assert.equal(starts.length, 3);
+	assert.equal(sleeps, 2);
+});
+
+test("defaultRunHerdr does not retry non-busy start failures", async () => {
+	const { defaultRunHerdr } = await import("./runners.mjs");
+	await assert.rejects(
+		() =>
+			defaultRunHerdr(
+				{
+					cwd: "/work",
+					herdr: {
+						kind: "pi",
+						agentLabel: "kimi",
+						tabLabel: "spawn:kimi",
+						agentArgs: [],
+						prompt: "brief",
+						timeoutMs: 5_000,
+					},
+				},
+				{
+					runCommand: async (_cmd, args) => {
+						if (args[0] === "tab") {
+							return {
+								stdout: JSON.stringify({
+									result: { root_pane: { pane_id: "p", tab_id: "t" }, tab: { tab_id: "t" } },
+								}),
+								stderr: "",
+								code: 0,
+							};
+						}
+						return { stdout: "", stderr: "boom start", code: 1 };
+					},
+				},
+			),
+		/boom start/,
+	);
 });
 
 test("package.json declares spawn extension and skills", async () => {
