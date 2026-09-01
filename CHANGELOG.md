@@ -4,6 +4,13 @@ All notable changes to packages in this monorepo are documented here.
 Each package is versioned and released independently under `packages/<name>`, via per-package tags
 `pi-<name>-vX.Y.Z` (see [docs/releases.md](docs/releases.md)).
 
+## pi-spawn 0.1.0 (2026-09-01)
+
+Initial release.
+
+- Confirmed named-agent fan-out through Herdr or headless Pi child processes.
+- `/spawn status` for retained partial runs and `spawn_follow_up` for existing Herdr child sessions.
+
 ## Monorepo (2026-08-15)
 
 - **npm scope moved from `@pi-extensions` to `@smarzban`**. The old `@pi-extensions/pi-pacman` and

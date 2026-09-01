@@ -35,7 +35,7 @@ Prefer that form. Area scopes (`pi-pacman`, `docs`, `release`) are welcome when 
 
 - Use the PR template.
 - Keep packages independent (no cross-package runtime deps).
-- Update `docs/usage/` when user-facing behavior changes.
+- Update the affected package README and the root package directory when user-facing behavior or npm availability changes.
 - CODEOWNERS: default reviewer `@smarzban`.
 
 ## Releases
@@ -49,7 +49,7 @@ git push origin pi-pacman-v0.1.1
 
 Each package releases independently.
 
-Requires npm Trusted Publisher (see [docs/releases.md](docs/releases.md)). Do not commit npm tokens.
+See [docs/releases.md](docs/releases.md) for first-publish and Trusted Publisher setup. Do not commit npm tokens.
 
 ## Code of conduct / security
 

@@ -38,7 +38,7 @@ The indicator only appears while the agent is **streaming a normal response**, n
 | **local path** | This package only | `pi install /absolute/path/to/pi-extensions/packages/pi-pacman` |
 | **git** (whole monorepo) | All packages in the repo | `pi install git:github.com/smarzban/pi-extensions` |
 
-More detail: [docs/install](../../docs/install/README.md) (one package vs whole monorepo).
+For repository-wide installation and package availability, see the [root README](../../README.md).
 
 ## Usage
 
@@ -61,7 +61,7 @@ More detail: [docs/install](../../docs/install/README.md) (one package vs whole 
 | `/pacman message …` | Lock custom working text (empty = auto-random) |
 | `/pacman off` | Hide indicator |
 
-Full reference: [docs/usage/commands.md](../../docs/usage/commands.md).
+The command table above is the complete `/pacman` reference.
 
 ## Looks
 
@@ -71,18 +71,13 @@ Full reference: [docs/usage/commands.md](../../docs/usage/commands.md).
 | `chase` | Full-width Blinky hunt → power pellet → revenge |
 | `mini` / `arcade` / `fruit` | Fixed-width animations (**in rotate**); width via `cells` config |
 
-Details: [docs/usage/looks.md](../../docs/usage/looks.md). Persistence: [docs/usage/persistence.md](../../docs/usage/persistence.md).
+Your selected look, rotation mode, fixed width, and custom message persist in `~/.pi/agent/pacman-thinking.json`.
 
-## Documentation
+## Repository docs
 
-| Doc | What |
-|-----|------|
-| [Quickstart](../../docs/quickstart.md) | Fastest path to first chomp |
-| [Commands](../../docs/usage/commands.md) | Every `/pacman` subcommand |
-| [Looks](../../docs/usage/looks.md) | Frame / width notes |
-| [Persistence](../../docs/usage/persistence.md) | State file fields |
-| [Architecture](../../docs/architecture.md) | How the extension hooks pi |
-| [Releases](../../docs/releases.md) | Maintainer publish flow |
+- [Package directory and install availability](../../README.md)
+- [Local development](../../docs/development.md)
+- [Release process](../../docs/releases.md)
 
 ## License
 
