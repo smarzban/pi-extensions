@@ -1277,8 +1277,11 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 	const tools = new Map();
 	const messages = [];
 	const entries = [];
+	const sessionStartHandlers = [];
 	const pi = {
-		on() {},
+		on(name, handler) {
+			if (name === "session_start") sessionStartHandlers.push(handler);
+		},
 		appendEntry(customType, data) {
 			entries.push({ customType, data });
 		},
@@ -1318,6 +1321,37 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 	});
 	assert.ok(commands.has("spawn"));
 	assert.ok(tools.has("spawn_run"));
+	assert.equal(sessionStartHandlers.length, 1);
+	await sessionStartHandlers[0](
+		{},
+		{
+			sessionManager: {
+				getEntries: () => [
+					{
+						type: "message",
+						message: {
+							role: "toolResult",
+							toolName: "spawn_run",
+							details: {
+								runId: "old-run",
+								runtime: "herdr",
+								timeoutMs: null,
+								panes: [{ agentName: "opus", paneId: "old-pane" }],
+							},
+						},
+					},
+				],
+			},
+		},
+	);
+	const restoredFollowUp = await tools.get("spawn_follow_up").execute(
+		"restored",
+		{ question: "What if we use a prefix?" },
+		undefined,
+		undefined,
+		{ cwd: "/ignored" },
+	);
+	assert.equal(restoredFollowUp.details.panes[0].paneId, "old-pane");
 	assert.ok(tools.has("spawn_follow_up"));
 	assert.equal(tools.get("spawn_run").name, "spawn_run");
 	assert.equal(tools.get("spawn_follow_up").name, "spawn_follow_up");

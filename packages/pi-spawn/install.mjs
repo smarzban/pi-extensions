@@ -64,6 +64,19 @@ export function installSpawn(pi, deps) {
 	/** @type {Map<string, { runId: string, runtime: string, timeoutMs: number | null, panes: Array<object> }>} */
 	const herdrRuns = new Map();
 	let latestHerdrRunId;
+	const restoreHerdrRun = (record) => {
+		if (
+			!record ||
+			record.runtime !== "herdr" ||
+			typeof record.runId !== "string" ||
+			!Array.isArray(record.panes)
+		) {
+			return false;
+		}
+		herdrRuns.set(record.runId, record);
+		latestHerdrRunId = record.runId;
+		return true;
+	};
 	const rememberHerdrRun = (run) => {
 		const record = {
 			runId: run.runId,
@@ -71,22 +84,23 @@ export function installSpawn(pi, deps) {
 			timeoutMs: run.timeoutMs,
 			panes: run.panes,
 		};
-		herdrRuns.set(record.runId, record);
-		latestHerdrRunId = record.runId;
+		if (!restoreHerdrRun(record)) return;
 		pi.appendEntry(HERDR_RUN_ENTRY, record);
 	};
 	pi.on("session_start", async (_event, ctx) => {
 		for (const entry of ctx.sessionManager.getEntries()) {
-			if (entry.type !== "custom" || entry.customType !== HERDR_RUN_ENTRY) continue;
-			const record = entry.data;
+			if (entry.type === "custom" && entry.customType === HERDR_RUN_ENTRY) {
+				restoreHerdrRun(entry.data);
+				continue;
+			}
+			// Allows a /reload after a run made by an earlier pi-spawn version:
+			// tool-result details already contain the returned Herdr pane IDs.
 			if (
-				record &&
-				record.runtime === "herdr" &&
-				typeof record.runId === "string" &&
-				Array.isArray(record.panes)
+				entry.type === "message" &&
+				entry.message?.role === "toolResult" &&
+				entry.message.toolName === SPAWN_TOOL
 			) {
-				herdrRuns.set(record.runId, record);
-				latestHerdrRunId = record.runId;
+				restoreHerdrRun(entry.message.details);
 			}
 		}
 	});
