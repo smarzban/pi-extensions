@@ -902,6 +902,8 @@ export async function executeSpawnFollowUp(plan, deps = {}) {
 	const makeDir = deps.mkdir ?? mkdir;
 	const write = deps.writeFile ?? writeFile;
 	const collect = deps.awaitAndCollect ?? awaitAndCollect;
+	const brief = typeof plan.brief === "string" && plan.brief.trim() ? plan.brief : `Follow-up: ${plan.question}`;
+	const manifestPlan = plan.brief === brief ? plan : { ...plan, brief };
 	const cleanup = deps.cleanupRunDir ?? cleanupRunDir;
 	if (!deps.runHerdrFollowUp) throw new Error("Herdr follow-up runner not configured");
 	await makeDir(plan.runDir, { recursive: true, mode: 0o700 });
@@ -911,13 +913,15 @@ export async function executeSpawnFollowUp(plan, deps = {}) {
 	const started = Date.now();
 	const startedAt = new Date(started).toISOString();
 	const panes = new Map(plan.launches.map((launch) => [launch.agentName, { paneId: launch.paneId, running: true }]));
-	await writeRunManifest(plan, { status: "running", startedAt, finishedAt: null, panes, writeFile: write }).catch(() => {});
+	await writeRunManifest(manifestPlan, { status: "running", startedAt, finishedAt: null, panes, writeFile: write }).catch(() => {});
 	const starters = plan.launches.map(async (launch) => {
 		try {
 			await deps.runHerdrFollowUp(launch, { timeoutMs: plan.timeoutMs, signal: deps.signal });
 			settled.set(launch.agentName, {});
 		} catch (err) {
 			const error = String(err?.message || err);
+			const pane = panes.get(launch.agentName);
+			if (pane) pane.running = false;
 			settled.set(launch.agentName, { error });
 			startErrors.push({ agentName: launch.agentName, error });
 		}
@@ -933,7 +937,7 @@ export async function executeSpawnFollowUp(plan, deps = {}) {
 			return entry?.error ? `follow-up error: ${entry.error}` : "no-finding";
 		},
 	});
-	await writeRunManifest(plan, {
+	await writeRunManifest(manifestPlan, {
 		status: collectedCleanly(collected) ? "complete" : "partial",
 		startedAt,
 		finishedAt: new Date().toISOString(),
@@ -946,7 +950,7 @@ export async function executeSpawnFollowUp(plan, deps = {}) {
 	return {
 		runId: plan.runId,
 		parentRunId: plan.parentRunId,
-		brief: plan.brief,
+		brief,
 		runtime: "herdr",
 		runDir: plan.runDir,
 		runDirKept: !collectedCleanly(collected),
@@ -956,7 +960,7 @@ export async function executeSpawnFollowUp(plan, deps = {}) {
 		timedOut: collected.timedOut,
 		elapsedMs: Date.now() - started,
 		startErrors,
-		panes: plan.launches.map((launch) => ({ agentName: launch.agentName, paneId: launch.paneId })),
+		panes: plan.launches.map((launch) => ({ agentName: launch.agentName, ...panes.get(launch.agentName) })),
 	};
 }
 

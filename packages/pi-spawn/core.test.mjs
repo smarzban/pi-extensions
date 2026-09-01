@@ -901,6 +901,7 @@ test("executeSpawnFollowUp keeps a manifest and run dir when an existing pane fa
 		baseDir: root,
 		followUpId: "failed",
 	});
+	delete plan.brief;
 	const result = await executeSpawnFollowUp(plan, {
 		runHerdrFollowUp: async () => {
 			throw new Error("herdr agent follow-up failed: pane is closed");
@@ -909,7 +910,10 @@ test("executeSpawnFollowUp keeps a manifest and run dir when an existing pane fa
 	assert.equal(result.runDirKept, true);
 	assert.ok(result.startErrors.some((error) => /closed/.test(error.error)));
 	assert.ok(result.missing.some((missing) => /follow-up error/.test(missing.reason)));
+	assert.equal(result.brief, "Follow-up: What if?");
+	assert.equal(result.panes[0].running, false);
 	const manifest = JSON.parse(await readFile(manifestPathFor(plan.runDir), "utf8"));
+	assert.equal(manifest.brief, "Follow-up: What if?");
 	assert.equal(manifest.status, "partial");
 	assert.equal(manifest.agents[0].status, "missing");
 	await rm(root, { recursive: true, force: true });
