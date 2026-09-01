@@ -65,7 +65,18 @@ export function installSpawn(pi, deps) {
 	const herdrRuns = new Map();
 	let latestHerdrRunId;
 	let restoreSequence = 0;
+	const refreshLatestHerdrRun = () => {
+		latestHerdrRunId = [...herdrRuns.values()].reduce(
+			(latest, record) => (!latest || record.launchedAt >= latest.launchedAt ? record : latest),
+			undefined,
+		)?.runId;
+	};
 	const restoreHerdrRun = (record, legacyToolResult = false) => {
+		if (record?.invalidated === true && typeof record.runId === "string") {
+			herdrRuns.delete(record.runId);
+			refreshLatestHerdrRun();
+			return true;
+		}
 		const runningPanes = Array.isArray(record?.panes)
 			? record.panes.filter(
 					(pane) =>
@@ -99,6 +110,11 @@ export function installSpawn(pi, deps) {
 		if (!restoreHerdrRun(record)) return;
 		pi.appendEntry(HERDR_RUN_ENTRY, record);
 	};
+	const forgetHerdrRun = (run) => {
+		herdrRuns.delete(run.runId);
+		refreshLatestHerdrRun();
+		pi.appendEntry(HERDR_RUN_ENTRY, { runId: run.runId, runtime: "herdr", invalidated: true });
+	};
 	pi.on("session_start", async (_event, ctx) => {
 		for (const entry of ctx.sessionManager.getEntries()) {
 			if (entry.type === "custom" && entry.customType === HERDR_RUN_ENTRY) {
@@ -112,7 +128,12 @@ export function installSpawn(pi, deps) {
 				entry.message?.role === "toolResult" &&
 				entry.message.toolName === SPAWN_TOOL
 			) {
-				restoreHerdrRun(entry.message.details, true);
+				const details = entry.message.details;
+				if (typeof details?.runId === "string" && herdrRuns.has(details.runId)) continue;
+				const legacy = details?.runId
+					? details
+					: { ...details, runId: `legacy-${entry.id ?? ++restoreSequence}` };
+				restoreHerdrRun(legacy, true);
 			}
 		}
 	});
@@ -214,6 +235,12 @@ export function installSpawn(pi, deps) {
 				runHerdrFollowUp,
 				signal: signal ?? undefined,
 			});
+			const failed = new Set(result.startErrors.map((error) => error.agentName));
+			if (failed.size) {
+				const remaining = run.panes.filter((pane) => !failed.has(pane.agentName));
+				if (remaining.length) rememberHerdrRun({ ...run, panes: remaining }, run.launchedAt);
+				else forgetHerdrRun(run);
+			}
 			return { content: [{ type: "text", text: formatSpawnResult(result) }], details: result };
 		},
 	});
@@ -264,10 +291,15 @@ export function installSpawn(pi, deps) {
 					},
 				],
 			});
+			const runningPanes = new Map();
 			const result = await executeSpawnRun(plan, {
 				runHeadless,
 				runHerdr,
 				signal: signal ?? undefined,
+				onHerdrAgentRunning: (agentName, pane) => {
+					runningPanes.set(agentName, { agentName, ...pane });
+					rememberHerdrRun({ ...plan, panes: [...runningPanes.values()] }, launchedAt);
+				},
 			});
 			if (result.runtime === "herdr") {
 				rememberHerdrRun(result, launchedAt);

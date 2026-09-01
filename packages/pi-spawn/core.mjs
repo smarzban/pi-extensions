@@ -735,7 +735,8 @@ export function planSpawnFollowUp(input) {
  *   awaitAndCollect?: typeof awaitAndCollect,
  *   cleanupRunDir?: typeof cleanupRunDir,
  *   runHeadless?: (launch: object, opts: { timeoutMs?: number | null, signal?: AbortSignal }) => Promise<unknown>,
- *   runHerdr?: (launch: object, opts: { timeoutMs?: number | null, signal?: AbortSignal, onStarted?: (info: object) => void }) => Promise<unknown>,
+ *   runHerdr?: (launch: object, opts: { timeoutMs?: number | null, signal?: AbortSignal, onStarted?: (info: object) => void, onAgentRunning?: (info: object) => void }) => Promise<unknown>,
+ *   onHerdrAgentRunning?: (agentName: string, info: object) => void,
  *   signal?: AbortSignal,
  *   now?: () => number,
  *   sleep?: (ms: number) => Promise<void>,
@@ -781,12 +782,15 @@ export async function executeSpawnRun(plan, deps = {}) {
 		const opts = {
 			...runnerOpts,
 			onStarted: (info) => panes.set(launch.agentName, { ...info }),
-			onAgentRunning: (info) =>
-				panes.set(launch.agentName, {
+			onAgentRunning: (info) => {
+				const pane = {
 					...(panes.get(launch.agentName) ?? {}),
 					...info,
 					running: true,
-				}),
+				};
+				panes.set(launch.agentName, pane);
+				deps.onHerdrAgentRunning?.(launch.agentName, pane);
+			},
 		};
 		try {
 			if (launch.runtime === "herdr") {

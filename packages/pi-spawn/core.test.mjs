@@ -649,9 +649,12 @@ test("executeSpawnRun threads pane info from onStarted into result.panes", async
 		runId: "panes",
 		baseDir: root,
 	});
+	const reportedRunning = [];
 	const result = await executeSpawnRun(plan, {
+		onHerdrAgentRunning: (agentName, pane) => reportedRunning.push({ agentName, ...pane }),
 		runHerdr: async (launch, opts) => {
 			opts.onStarted?.({ paneId: `p-${launch.agentName}`, tabId: `t-${launch.agentName}` });
+			opts.onAgentRunning?.({ paneId: `p-${launch.agentName}`, tabId: `t-${launch.agentName}` });
 			if (launch.agentName === "opus") {
 				await writeFile(launch.findingPath, "opus ok\n");
 				return;
@@ -662,6 +665,10 @@ test("executeSpawnRun threads pane info from onStarted into result.panes", async
 		},
 		awaitAndCollect: (input) => awaitAndCollect({ ...input, pollMs: 10 }),
 	});
+	assert.deepEqual(
+		reportedRunning.map((p) => p.agentName).sort(),
+		["fable", "opus"],
+	);
 	assert.deepEqual(
 		result.panes.map((p) => p.agentName).sort(),
 		["fable", "opus"],
@@ -1406,6 +1413,7 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 	await writeFile(join(dir, "spawn.json"), JSON.stringify(fixtureConfig, null, 2));
 	let sawCwd;
 	let sawHerdr;
+	let failFollowUp = false;
 	installSpawn(pi, {
 		configPath: join(dir, "spawn.json"),
 		runHeadless: async () => {
@@ -1418,6 +1426,7 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 			await writeFile(launch.findingPath, "ok\n");
 		},
 		runHerdrFollowUp: async (launch) => {
+			if (failFollowUp) throw new Error("closed pane");
 			await writeFile(launch.findingPath, `follow-up: ${launch.question}\n`);
 		},
 		baseDir: dir,
@@ -1451,6 +1460,18 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 						},
 					},
 					{
+						type: "message",
+						message: {
+							role: "toolResult",
+							toolName: "spawn_run",
+							details: {
+								runId: "newer-run",
+								runtime: "herdr",
+								panes: [{ agentName: "fable", paneId: "unconfirmed-pane" }],
+							},
+						},
+					},
+					{
 						type: "custom",
 						customType: "pi-spawn:herdr-run",
 						data: {
@@ -1462,12 +1483,12 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 						},
 					},
 					{
+						id: "legacy-run",
 						type: "message",
 						message: {
 							role: "toolResult",
 							toolName: "spawn_run",
 							details: {
-								runId: "legacy-run",
 								runtime: "herdr",
 								timeoutMs: null,
 								panes: [{ agentName: "kimi", paneId: "legacy-pane" }],
@@ -1499,7 +1520,7 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 	assert.equal(restoredFollowUp.details.panes[0].paneId, "newer-pane");
 	const legacyFollowUp = await tools.get("spawn_follow_up").execute(
 		"legacy",
-		{ question: "What if we use a prefix?", runId: "legacy-run" },
+		{ question: "What if we use a prefix?", runId: "legacy-legacy-run" },
 		undefined,
 		undefined,
 		{ cwd: "/ignored" },
@@ -1533,8 +1554,8 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 	assert.equal(sawCwd, "/session/cwd");
 	assert.equal(sawHerdr, "1");
 	assert.equal(toolResult.details.runtime, "herdr");
-	assert.equal(entries.length, 1);
-	assert.equal(entries[0].customType, "pi-spawn:herdr-run");
+	assert.ok(entries.length >= 2);
+	assert.ok(entries.every((entry) => entry.customType === "pi-spawn:herdr-run"));
 	assert.equal(entries[0].data.panes[0].running, true);
 	const explicitOlderRun = await tools.get("spawn_follow_up").execute(
 		"older",
@@ -1553,6 +1574,24 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 	);
 	assert.match(followUpResult.content[0].text, /follow-up: What if we use a prefix\?/);
 	assert.equal(followUpResult.details.panes[0].paneId, "pane-opus");
+	failFollowUp = true;
+	const failedCurrent = await tools.get("spawn_follow_up").execute(
+		"failed",
+		{ question: "What if we use a prefix?", runId: toolResult.details.runId },
+		undefined,
+		undefined,
+		{ cwd: "/ignored" },
+	);
+	assert.ok(failedCurrent.details.startErrors.some((error) => /closed pane/.test(error.error)));
+	failFollowUp = false;
+	const fallback = await tools.get("spawn_follow_up").execute(
+		"fallback",
+		{ question: "What if we use a prefix?" },
+		undefined,
+		undefined,
+		{ cwd: "/ignored" },
+	);
+	assert.equal(fallback.details.panes[0].paneId, "newer-pane");
 	await rm(dir, { recursive: true, force: true });
 });
 
