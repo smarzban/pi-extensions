@@ -123,7 +123,7 @@ Use `/spawn status` to see which agents delivered and where their finding files 
 - It does not choose an editor or “best” model for you.
 - It does not run a parent-pane ping when a child completes.
 - It does not close your Herdr spawn tabs.
-- It does not orchestrate follow-up conversations with individual children.
+- It does not orchestrate multi-step task handoffs among children.
 
 ## Local development
 

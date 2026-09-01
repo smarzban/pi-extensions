@@ -64,24 +64,32 @@ export function installSpawn(pi, deps) {
 	/** @type {Map<string, { runId: string, runtime: string, timeoutMs: number | null, panes: Array<object> }>} */
 	const herdrRuns = new Map();
 	let latestHerdrRunId;
+	let restoreSequence = 0;
 	const restoreHerdrRun = (record) => {
+		const runningPanes = Array.isArray(record?.panes)
+			? record.panes.filter((pane) => typeof pane?.paneId === "string" && pane.running === true)
+			: [];
 		if (
 			!record ||
 			record.runtime !== "herdr" ||
 			typeof record.runId !== "string" ||
-			!Array.isArray(record.panes)
+			runningPanes.length === 0
 		) {
 			return false;
 		}
-		herdrRuns.set(record.runId, record);
-		latestHerdrRunId = record.runId;
+		const launchedAt = Number.isFinite(record.launchedAt) ? record.launchedAt : ++restoreSequence;
+		const normalized = { ...record, launchedAt, panes: runningPanes };
+		herdrRuns.set(normalized.runId, normalized);
+		const latest = latestHerdrRunId ? herdrRuns.get(latestHerdrRunId) : undefined;
+		if (!latest || normalized.launchedAt >= latest.launchedAt) latestHerdrRunId = normalized.runId;
 		return true;
 	};
-	const rememberHerdrRun = (run) => {
+	const rememberHerdrRun = (run, launchedAt) => {
 		const record = {
 			runId: run.runId,
 			runtime: run.runtime,
 			timeoutMs: run.timeoutMs,
+			launchedAt,
 			panes: run.panes,
 		};
 		if (!restoreHerdrRun(record)) return;
@@ -223,6 +231,7 @@ export function installSpawn(pi, deps) {
 		],
 		parameters,
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+			const launchedAt = Date.now();
 			onUpdate?.({ content: [{ type: "text", text: "Loading spawn.json…" }] });
 			const config = await loadSpawnConfig(configPath);
 			const useDefaultSet =
@@ -256,8 +265,8 @@ export function installSpawn(pi, deps) {
 				runHerdr,
 				signal: signal ?? undefined,
 			});
-			if (result.runtime === "herdr" && result.panes.some((pane) => pane.paneId)) {
-				rememberHerdrRun(result);
+			if (result.runtime === "herdr") {
+				rememberHerdrRun(result, launchedAt);
 			}
 			const text = formatSpawnResult(result);
 			return {

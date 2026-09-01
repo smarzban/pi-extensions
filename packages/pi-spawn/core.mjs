@@ -689,13 +689,14 @@ export function planSpawnFollowUp(input) {
 	const selected = input.names?.length
 		? new Set(input.names)
 		: new Set(input.run.panes.map((pane) => pane.agentName));
+	const known = new Set(input.run.panes.map((pane) => pane.agentName));
+	const missing = [...selected].filter((name) => !known.has(name));
+	if (missing.length) throw new Error(`spawn follow-up references unknown prior agent(s): ${missing.join(", ")}`);
 	const panes = input.run.panes.filter((pane) => selected.has(pane.agentName));
 	if (panes.length === 0) throw new Error("spawn follow-up has no matching Herdr child panes");
 	if (panes.some((pane) => !pane.paneId)) {
 		throw new Error("spawn follow-up requires pane IDs from the prior Herdr run");
 	}
-	const missing = [...selected].filter((name) => !panes.some((pane) => pane.agentName === name));
-	if (missing.length) throw new Error(`spawn follow-up references unknown prior agent(s): ${missing.join(", ")}`);
 
 	const followUpId = String(input.followUpId || "").trim() || `follow-${Date.now()}`;
 	const baseDir = input.baseDir ?? tmpdir();
@@ -713,7 +714,16 @@ export function planSpawnFollowUp(input) {
 			prompt: buildFollowUpPrompt({ question, findingPath, agentName: pane.agentName }),
 		};
 	});
-	return { runId: followUpId, parentRunId: runId, runDir, runtime: "herdr", question, timeoutMs, launches };
+	return {
+		runId: followUpId,
+		parentRunId: runId,
+		runDir,
+		runtime: "herdr",
+		brief: `Follow-up: ${question}`,
+		question,
+		timeoutMs,
+		launches,
+	};
 }
 
 /**
@@ -890,6 +900,7 @@ export async function executeSpawnRun(plan, deps = {}) {
  */
 export async function executeSpawnFollowUp(plan, deps = {}) {
 	const makeDir = deps.mkdir ?? mkdir;
+	const write = deps.writeFile ?? writeFile;
 	const collect = deps.awaitAndCollect ?? awaitAndCollect;
 	const cleanup = deps.cleanupRunDir ?? cleanupRunDir;
 	if (!deps.runHerdrFollowUp) throw new Error("Herdr follow-up runner not configured");
@@ -898,6 +909,9 @@ export async function executeSpawnFollowUp(plan, deps = {}) {
 	const settled = new Map();
 	const startErrors = [];
 	const started = Date.now();
+	const startedAt = new Date(started).toISOString();
+	const panes = new Map(plan.launches.map((launch) => [launch.agentName, { paneId: launch.paneId, running: true }]));
+	await writeRunManifest(plan, { status: "running", startedAt, finishedAt: null, panes, writeFile: write });
 	const starters = plan.launches.map(async (launch) => {
 		try {
 			await deps.runHerdrFollowUp(launch, { timeoutMs: plan.timeoutMs, signal: deps.signal });
@@ -919,11 +933,20 @@ export async function executeSpawnFollowUp(plan, deps = {}) {
 			return entry?.error ? `follow-up error: ${entry.error}` : "no-finding";
 		},
 	});
+	await writeRunManifest(plan, {
+		status: collectedCleanly(collected) ? "complete" : "partial",
+		startedAt,
+		finishedAt: new Date().toISOString(),
+		panes,
+		findings: collected.findings,
+		missing: collected.missing,
+		writeFile: write,
+	}).catch(() => {});
 	if (collectedCleanly(collected)) await cleanup(plan.runDir);
 	return {
 		runId: plan.runId,
 		parentRunId: plan.parentRunId,
-		brief: `Follow-up: ${plan.question}`,
+		brief: plan.brief,
 		runtime: "herdr",
 		runDir: plan.runDir,
 		runDirKept: !collectedCleanly(collected),
