@@ -911,7 +911,7 @@ export async function executeSpawnFollowUp(plan, deps = {}) {
 	const started = Date.now();
 	const startedAt = new Date(started).toISOString();
 	const panes = new Map(plan.launches.map((launch) => [launch.agentName, { paneId: launch.paneId, running: true }]));
-	await writeRunManifest(plan, { status: "running", startedAt, finishedAt: null, panes, writeFile: write });
+	await writeRunManifest(plan, { status: "running", startedAt, finishedAt: null, panes, writeFile: write }).catch(() => {});
 	const starters = plan.launches.map(async (launch) => {
 		try {
 			await deps.runHerdrFollowUp(launch, { timeoutMs: plan.timeoutMs, signal: deps.signal });

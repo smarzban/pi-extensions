@@ -27,6 +27,7 @@
 	"files": [
 		"index.ts",
 		"core.mjs",
+		"defaults.mjs",
 		"install.mjs",
 		"runners.mjs",
 		"skills",

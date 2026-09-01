@@ -65,9 +65,13 @@ export function installSpawn(pi, deps) {
 	const herdrRuns = new Map();
 	let latestHerdrRunId;
 	let restoreSequence = 0;
-	const restoreHerdrRun = (record) => {
+	const restoreHerdrRun = (record, legacyToolResult = false) => {
 		const runningPanes = Array.isArray(record?.panes)
-			? record.panes.filter((pane) => typeof pane?.paneId === "string" && pane.running === true)
+			? record.panes.filter(
+					(pane) =>
+						typeof pane?.paneId === "string" &&
+						(pane.running === true || (legacyToolResult && pane.running === undefined)),
+				)
 			: [];
 		if (
 			!record ||
@@ -108,7 +112,7 @@ export function installSpawn(pi, deps) {
 				entry.message?.role === "toolResult" &&
 				entry.message.toolName === SPAWN_TOOL
 			) {
-				restoreHerdrRun(entry.message.details);
+				restoreHerdrRun(entry.message.details, true);
 			}
 		}
 	});

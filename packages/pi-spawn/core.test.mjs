@@ -915,6 +915,25 @@ test("executeSpawnFollowUp keeps a manifest and run dir when an existing pane fa
 	await rm(root, { recursive: true, force: true });
 });
 
+test("executeSpawnFollowUp continues when manifest writes fail", async () => {
+	const root = await tempDir("pi-spawn-followup-manifest-fail-");
+	const plan = planSpawnFollowUp({
+		run: { runId: "initial", runtime: "herdr", panes: [{ agentName: "opus", paneId: "w7:p1" }] },
+		question: "What if?",
+		baseDir: root,
+		followUpId: "manifest-fail",
+	});
+	const result = await executeSpawnFollowUp(plan, {
+		writeFile: async () => {
+			throw new Error("disk full");
+		},
+		runHerdrFollowUp: async (launch) => writeFile(launch.findingPath, "answer\n"),
+	});
+	assert.equal(result.findings.length, 1);
+	assert.equal(result.runDirKept, false);
+	await rm(root, { recursive: true, force: true });
+});
+
 test("executeSpawnRun records startErrors when a runner rejects", async () => {
 	const root = await tempDir("pi-spawn-starterr-");
 	const plan = planSpawnRun({
@@ -1233,6 +1252,17 @@ test("defaultRunHerdrFollowUp prompts an existing pane without creating a tab", 
 	assert.equal(timedCalls[0].options.timeoutMs, 5_123);
 });
 
+test("resolveSpawnRunners uses production follow-up runner unless overridden", async () => {
+	const { resolveSpawnRunners } = await import("./defaults.mjs");
+	const { defaultRunHeadless, defaultRunHerdr, defaultRunHerdrFollowUp } = await import("./runners.mjs");
+	const defaults = resolveSpawnRunners();
+	assert.equal(defaults.runHeadless, defaultRunHeadless);
+	assert.equal(defaults.runHerdr, defaultRunHerdr);
+	assert.equal(defaults.runHerdrFollowUp, defaultRunHerdrFollowUp);
+	const custom = async () => {};
+	assert.equal(resolveSpawnRunners({ runHerdrFollowUp: custom }).runHerdrFollowUp, custom);
+});
+
 test("defaultRunHerdr retries agent start when pane is not yet an available shell", async () => {
 	const { defaultRunHerdr } = await import("./runners.mjs");
 	const starts = [];
@@ -1341,6 +1371,7 @@ test("package.json declares spawn extension and skills", async () => {
 	assert.equal(pkg.name, "@smarzban/pi-spawn");
 	assert.deepEqual(pkg.pi.extensions, ["./index.ts"]);
 	assert.deepEqual(pkg.pi.skills, ["./skills"]);
+	assert.ok(pkg.files.includes("defaults.mjs"));
 });
 
 test("installSpawn registers /spawn command and spawn_run tool", async () => {
@@ -1427,6 +1458,19 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 						},
 					},
 					{
+						type: "message",
+						message: {
+							role: "toolResult",
+							toolName: "spawn_run",
+							details: {
+								runId: "legacy-run",
+								runtime: "herdr",
+								timeoutMs: null,
+								panes: [{ agentName: "kimi", paneId: "legacy-pane" }],
+							},
+						},
+					},
+					{
 						type: "custom",
 						customType: "pi-spawn:herdr-run",
 						data: {
@@ -1449,6 +1493,14 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 		{ cwd: "/ignored" },
 	);
 	assert.equal(restoredFollowUp.details.panes[0].paneId, "newer-pane");
+	const legacyFollowUp = await tools.get("spawn_follow_up").execute(
+		"legacy",
+		{ question: "What if we use a prefix?", runId: "legacy-run" },
+		undefined,
+		undefined,
+		{ cwd: "/ignored" },
+	);
+	assert.equal(legacyFollowUp.details.panes[0].paneId, "legacy-pane");
 	assert.ok(tools.has("spawn_follow_up"));
 	assert.equal(tools.get("spawn_run").name, "spawn_run");
 	assert.equal(tools.get("spawn_follow_up").name, "spawn_follow_up");
@@ -1507,7 +1559,8 @@ test("index.ts wires installSpawn to register spawn command and tool", async () 
 	assert.match(src, /getAgentDir\(\)/);
 	assert.match(src, /defaultRunHeadless/);
 	assert.match(src, /defaultRunHerdr/);
-	assert.match(src, /runHerdrFollowUp:\s*deps\.runHerdrFollowUp\s*\?\?\s*defaultRunHerdrFollowUp/);
+	assert.match(src, /const runners = resolveSpawnRunners\(deps\)/);
+	assert.match(src, /\.\.\.runners/);
 	assert.match(src, /Type\.Object/);
 	assert.match(src, /export default function/);
 	assert.match(src, /deps\.configPath \?\? join\(getAgentDir\(\), "spawn\.json"\)/);
