@@ -73,6 +73,7 @@ Run `/reload` or start a new Pi session. Then use `/spawn`, describe what you wa
 | `/spawn background the agents on this` | Uses the default set headlessly, even in a Herdr session. |
 | “Spawn the agents to investigate …” | The bundled `spawn` skill follows the same draft → confirm → run flow. |
 | `/spawn status` | Shows partial or cancelled runs retained for later inspection. |
+| “Ask the spawned agents: what if we use X?” | Pi sends that follow-up to the most recent Herdr child sessions, reuses their tabs, and returns their updated findings. |
 
 A current-topic command still asks for confirmation. Nothing starts until you approve the displayed brief.
 
@@ -93,6 +94,10 @@ confirmed brief
 5. The parent compares them and answers you. Findings are treated as untrusted child data, not instructions.
 
 With `HERDR_ENV=1`, children appear in `spawn:<name>` tabs. Otherwise they run with headless `pi -p --no-session`. Spawn tabs are never closed automatically.
+
+### Follow up with the same agents
+
+After a Herdr run, ask the parent to relay a question such as “what if we use a prefix instead?” Pi uses `spawn_follow_up`, which sends the question to those agents' existing sessions. It does **not** create replacement tabs, and the agents retain their original context. This works for the most recent Herdr run, including after `/reload`; headless children cannot be resumed because they run without sessions.
 
 ## Configuration
 

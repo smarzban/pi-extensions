@@ -4,14 +4,19 @@ import { tmpdir } from "node:os";
 import {
 	SPAWN_COMMAND,
 	SPAWN_TOOL,
+	SPAWN_FOLLOW_UP_TOOL,
 	loadSpawnConfig,
 	parseSpawnArgs,
 	planSpawnRun,
+	planSpawnFollowUp,
 	executeSpawnRun,
+	executeSpawnFollowUp,
 	formatSpawnResult,
 	listSpawnRunStatus,
 	formatSpawnStatus,
 } from "./core.mjs";
+
+const HERDR_RUN_ENTRY = "pi-spawn:herdr-run";
 
 const DEFAULT_TOOL_PARAMETERS = {
 	type: "object",
@@ -42,6 +47,7 @@ const DEFAULT_TOOL_PARAMETERS = {
  *   configPath: string,
  *   runHeadless?: Function,
  *   runHerdr?: Function,
+ *   runHerdrFollowUp?: Function,
  *   baseDir?: string,
  *   getCwd?: (ctx: { cwd: string }) => string,
  *   getHerdrEnv?: () => string | undefined,
@@ -53,7 +59,37 @@ export function installSpawn(pi, deps) {
 	const configPath = deps.configPath;
 	const runHeadless = deps.runHeadless;
 	const runHerdr = deps.runHerdr;
+	const runHerdrFollowUp = deps.runHerdrFollowUp;
 	const baseDir = deps.baseDir ?? tmpdir();
+	/** @type {Map<string, { runId: string, runtime: string, timeoutMs: number | null, panes: Array<object> }>} */
+	const herdrRuns = new Map();
+	let latestHerdrRunId;
+	const rememberHerdrRun = (run) => {
+		const record = {
+			runId: run.runId,
+			runtime: run.runtime,
+			timeoutMs: run.timeoutMs,
+			panes: run.panes,
+		};
+		herdrRuns.set(record.runId, record);
+		latestHerdrRunId = record.runId;
+		pi.appendEntry(HERDR_RUN_ENTRY, record);
+	};
+	pi.on("session_start", async (_event, ctx) => {
+		for (const entry of ctx.sessionManager.getEntries()) {
+			if (entry.type !== "custom" || entry.customType !== HERDR_RUN_ENTRY) continue;
+			const record = entry.data;
+			if (
+				record &&
+				record.runtime === "herdr" &&
+				typeof record.runId === "string" &&
+				Array.isArray(record.panes)
+			) {
+				herdrRuns.set(record.runId, record);
+				latestHerdrRunId = record.runId;
+			}
+		}
+	});
 	const getCwd = deps.getCwd ?? ((ctx) => ctx.cwd);
 	const getHerdrEnv = deps.getHerdrEnv ?? (() => process.env.HERDR_ENV);
 	const parameters = deps.parameters ?? DEFAULT_TOOL_PARAMETERS;
@@ -115,6 +151,48 @@ export function installSpawn(pi, deps) {
 	});
 
 	pi.registerTool({
+		name: SPAWN_FOLLOW_UP_TOOL,
+		label: "Spawn follow-up",
+		description:
+			"Ask existing Herdr spawn children a follow-up question in their current sessions. Reuses their tabs and returns updated findings. Never creates new tabs.",
+		promptSnippet: "Ask the most recent Herdr spawn children a follow-up without opening new tabs",
+		promptGuidelines: [
+			"Use spawn_follow_up, not spawn_run, when the user asks the already-spawned agents to reconsider, compare a new option, or answer a follow-up such as 'what if we do X?'.",
+			"Use spawn_follow_up only for a direct user follow-up to the most recent Herdr spawn. It reuses existing child sessions and creates no tabs.",
+			"Do not call spawn_run as a fallback if spawn_follow_up reports no resumable Herdr run. Explain the limitation instead.",
+			"After spawn_follow_up returns, synthesize its updated findings for the user and clearly mark missing agents.",
+		],
+		parameters: deps.followUpParameters ?? {
+			type: "object",
+			properties: {
+				question: { type: "string", description: "Question sent to the existing spawned agents" },
+				names: { type: "array", items: { type: "string" }, description: "Optional subset of the prior agents" },
+				runId: { type: "string", description: "Prior Herdr spawn run ID; omit for the most recent one" },
+			},
+			required: ["question"],
+		},
+		async execute(_toolCallId, params, signal, onUpdate) {
+			const run = params.runId ? herdrRuns.get(params.runId) : herdrRuns.get(latestHerdrRunId);
+			if (!run) {
+				throw new Error("No resumable Herdr spawn is known in this session. Headless runs cannot receive follow-ups.");
+			}
+			onUpdate?.({ content: [{ type: "text", text: "Sending follow-up to existing Herdr agent tabs…" }] });
+			const plan = planSpawnFollowUp({
+				run,
+				question: params.question,
+				names: params.names,
+				baseDir,
+				followUpId: randomUUID(),
+			});
+			const result = await executeSpawnFollowUp(plan, {
+				runHerdrFollowUp,
+				signal: signal ?? undefined,
+			});
+			return { content: [{ type: "text", text: formatSpawnResult(result) }], details: result };
+		},
+	});
+
+	pi.registerTool({
 		name: SPAWN_TOOL,
 		label: "Spawn run",
 		description:
@@ -164,6 +242,9 @@ export function installSpawn(pi, deps) {
 				runHerdr,
 				signal: signal ?? undefined,
 			});
+			if (result.runtime === "herdr" && result.panes.some((pane) => pane.paneId)) {
+				rememberHerdrRun(result);
+			}
 			const text = formatSpawnResult(result);
 			return {
 				content: [{ type: "text", text }],

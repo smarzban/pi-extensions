@@ -17,8 +17,9 @@ Use this skill instead of manually opening Herdr tabs or inventing your own fan-
    - `useDefaultSet: true` for “the agents”, or `names: ["…"]` for a named agent
    - `background: true` if the user asked for background/headless
 4. **Synthesize** the returned findings in chat. Mark missing/failed agents clearly. Do not claim they finished.
-5. **Investigate stragglers**: for each missing agent that has a pane, use **non-blocking** herdr tools (`herdr_agent` get/read) to see whether it is stuck, blocked, waiting on usage limits, or still working.
-6. **Late findings**: use `/spawn status` (or ask to check the run) and read finding files under the kept run dir. Children do **not** ping the parent chat.
+5. **Follow-ups**: when the user asks the same already-spawned Herdr agents “what if…?”, asks them to reconsider, or asks a direct follow-up, call `spawn_follow_up` instead of `spawn_run`. It reuses the existing child sessions and creates no tabs. Do not substitute a new spawn if no resumable Herdr run exists.
+6. **Investigate stragglers**: for each missing agent that has a pane, use **non-blocking** herdr tools (`herdr_agent` get/read) to see whether it is stuck, blocked, waiting on usage limits, or still working.
+7. **Late findings**: use `/spawn status` (or ask to check the run) and read finding files under the kept run dir. Children do **not** ping the parent chat.
 
 ## Surfaces
 
@@ -26,6 +27,7 @@ Use this skill instead of manually opening Herdr tabs or inventing your own fan-
 - `/spawn <name> on this` — draft from current topic for that named agent
 - `/spawn the agents on this` — draft from current topic for the default set
 - `/spawn status` — list kept partial runs and which findings landed
+- Follow-up requests to the parent (“ask the spawned agents what if we use X?”) — call `spawn_follow_up` to reuse the latest Herdr tabs
 - Natural language (“spawn the agents on this”, “run opus and fable on …”, “get the agents to investigate …”) — same workflow
 
 ## Rules
@@ -33,7 +35,8 @@ Use this skill instead of manually opening Herdr tabs or inventing your own fan-
 - Never start children until the user confirms the brief.
 - Never open Herdr tabs or run `pi -p` yourself for spawn; the tools own runtime selection (`HERDR_ENV=1` → Herdr tabs, else headless; background forces headless).
 - **`spawn_run` waits until every child finishes** (returns early when the last one lands). Optional `timeoutMs` in `spawn.json` is only a safety ceiling; omit/`null` means wait until done or cancel.
-- **Never call `herdr_agent wait` on spawn children.** That freezes the parent chat.
+- **Never call `herdr_agent wait` on spawn children.** That freezes the parent chat. `spawn_follow_up` owns its own wait/collect cycle.
 - **Never close spawn tabs or panes, on success or failure, unless the user explicitly asks.**
 - Children write findings under `~/.pi/agent/spawn-runs/`. Complete runs are cleaned up; partial/cancelled runs are kept for `/spawn status`.
+- `spawn_follow_up` works only for Herdr children. Headless `--no-session` children cannot be resumed, so say so instead of starting replacement children.
 - Parent owns synthesis. There are no modes, no editor/optimizer model, and no parent-pane pings.

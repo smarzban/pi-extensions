@@ -240,6 +240,22 @@ export async function startHerdrAgentWithRetry(launch, paneId, opts = {}) {
 	);
 }
 
+/** Prompt an existing Herdr child. Unlike defaultRunHerdr, this never creates a tab. */
+export async function defaultRunHerdrFollowUp(launch, opts = {}) {
+	const timeoutMs = opts.timeoutMs ?? launch.timeoutMs;
+	const run = opts.runCommand ?? runCommand;
+	const promptArgs = ["agent", "prompt", launch.paneId, launch.prompt, "--wait", "--until", "done", "--until", "idle"];
+	if (timeoutMs != null) promptArgs.push("--timeout", String(timeoutMs));
+	const prompted = await run("herdr", promptArgs, {
+		...(timeoutMs != null ? { timeoutMs: timeoutMs + 5_000 } : {}),
+		signal: opts.signal,
+	});
+	if (prompted.code !== 0) {
+		throw new Error(`herdr agent follow-up failed: ${prompted.stderr || prompted.stdout}`);
+	}
+	return { paneId: launch.paneId };
+}
+
 export async function defaultRunHerdr(launch, opts = {}) {
 	const timeoutMs = opts.timeoutMs ?? launch.herdr.timeoutMs ?? launch.timeoutMs;
 	const run = opts.runCommand ?? runCommand;
