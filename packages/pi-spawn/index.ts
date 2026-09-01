@@ -1,18 +1,20 @@
 import { join } from "node:path";
 import { Type } from "typebox";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { SPAWN_COMMAND, SPAWN_TOOL, formatSpawnResult } from "./core.mjs";
+import { SPAWN_COMMAND, SPAWN_TOOL, SPAWN_FOLLOW_UP_TOOL, formatSpawnResult } from "./core.mjs";
 import { installSpawn as installSpawnCore } from "./install.mjs";
-import { defaultRunHeadless, defaultRunHerdr, runCommand } from "./runners.mjs";
+import { defaultRunHeadless, defaultRunHerdr, defaultRunHerdrFollowUp, runCommand } from "./runners.mjs";
+import { resolveSpawnRunners } from "./defaults.mjs";
 
-export { formatSpawnResult, SPAWN_COMMAND, SPAWN_TOOL };
-export { runCommand, defaultRunHeadless, defaultRunHerdr };
+export { formatSpawnResult, SPAWN_COMMAND, SPAWN_TOOL, SPAWN_FOLLOW_UP_TOOL };
+export { runCommand, defaultRunHeadless, defaultRunHerdr, defaultRunHerdrFollowUp, resolveSpawnRunners };
 export { installSpawn as installSpawnCore } from "./install.mjs";
 
 export type InstallSpawnDeps = {
 	configPath?: string;
 	runHeadless?: typeof defaultRunHeadless;
 	runHerdr?: typeof defaultRunHerdr;
+	runHerdrFollowUp?: typeof defaultRunHerdrFollowUp;
 	baseDir?: string;
 	getCwd?: (ctx: { cwd: string }) => string;
 	getHerdrEnv?: () => string | undefined;
@@ -22,13 +24,18 @@ export type InstallSpawnDeps = {
  * Register /spawn and spawn_run. Exported for unit tests with injectable deps.
  */
 export function installSpawn(pi: ExtensionAPI, deps: InstallSpawnDeps = {}) {
+	const runners = resolveSpawnRunners(deps);
 	installSpawnCore(pi, {
 		configPath: deps.configPath ?? join(getAgentDir(), "spawn.json"),
-		runHeadless: deps.runHeadless ?? defaultRunHeadless,
-		runHerdr: deps.runHerdr ?? defaultRunHerdr,
+		...runners,
 		baseDir: deps.baseDir ?? join(getAgentDir(), "spawn-runs"),
 		getCwd: deps.getCwd,
 		getHerdrEnv: deps.getHerdrEnv,
+		followUpParameters: Type.Object({
+			question: Type.String({ description: "Question sent to the existing spawned agents" }),
+			names: Type.Optional(Type.Array(Type.String(), { description: "Optional subset of prior agents" })),
+			runId: Type.Optional(Type.String({ description: "Prior Herdr spawn run ID; omit for most recent" })),
+		}),
 		parameters: Type.Object({
 			brief: Type.String({ description: "Confirmed brief text sent to every child" }),
 			confirmed: Type.Boolean({ description: "Must be true; user confirmed the brief" }),

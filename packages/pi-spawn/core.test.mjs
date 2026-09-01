@@ -22,8 +22,11 @@ import {
 	formatSpawnResult,
 	SPAWN_COMMAND,
 	SPAWN_TOOL,
+	SPAWN_FOLLOW_UP_TOOL,
 	planSpawnRun,
+	planSpawnFollowUp,
 	executeSpawnRun,
+	executeSpawnFollowUp,
 } from "./core.mjs";
 
 const fixtureConfig = {
@@ -364,9 +367,10 @@ test("createRunDir uses private mode 0700", async () => {
 	await rm(root, { recursive: true, force: true });
 });
 
-test("SPAWN_COMMAND and SPAWN_TOOL names are spawn", () => {
+test("spawn tool names are stable", () => {
 	assert.equal(SPAWN_COMMAND, "spawn");
 	assert.equal(SPAWN_TOOL, "spawn_run");
+	assert.equal(SPAWN_FOLLOW_UP_TOOL, "spawn_follow_up");
 });
 
 test("planSpawnRun refuses unconfirmed brief before building launches", () => {
@@ -425,6 +429,73 @@ test("planSpawnRun named agent does not expand default set", () => {
 	assert.equal(plan.launches.length, 1);
 	assert.equal(plan.launches[0].agentName, "flash");
 	assert.equal(plan.launches[0].model, "google/gemini-2.5-flash");
+});
+
+test("planSpawnFollowUp reuses existing Herdr panes without creating tabs", () => {
+	const plan = planSpawnFollowUp({
+		run: {
+			runId: "initial",
+			runtime: "herdr",
+			timeoutMs: null,
+			panes: [
+				{ agentName: "opus", paneId: "w7:p1" },
+				{ agentName: "fable", paneId: "w7:p2" },
+			],
+		},
+		question: "What if we use a prefix?",
+		baseDir: "/tmp",
+		followUpId: "follow-1",
+	});
+	assert.equal(plan.runtime, "herdr");
+	assert.equal(plan.launches.length, 2);
+	assert.deepEqual(
+		plan.launches.map((launch) => [launch.agentName, launch.paneId]),
+		[
+			["opus", "w7:p1"],
+			["fable", "w7:p2"],
+		],
+	);
+	assert.match(plan.launches[0].prompt, /What if we use a prefix\?/);
+	assert.match(plan.launches[0].findingPath, /pi-spawn-followup-initial-follow-1/);
+	const subset = planSpawnFollowUp({
+		run: {
+			runId: "initial",
+			runtime: "herdr",
+			panes: [
+				{ agentName: "opus", paneId: "w7:p1" },
+				{ agentName: "fable", paneId: "w7:p2" },
+			],
+		},
+		question: "Only opus?",
+		names: ["opus"],
+		followUpId: "subset",
+	});
+	assert.deepEqual(subset.launches.map((launch) => launch.agentName), ["opus"]);
+	assert.throws(
+		() =>
+			planSpawnFollowUp({
+				run: { runId: "initial", runtime: "herdr", panes: [{ agentName: "opus" }] },
+				question: "Missing pane?",
+			}),
+		/pane IDs/i,
+	);
+	assert.throws(
+		() =>
+			planSpawnFollowUp({
+				run: { runId: "initial", runtime: "herdr", panes: [{ agentName: "opus", paneId: "w7:p1" }] },
+				question: "Unknown?",
+				names: ["unknown"],
+			}),
+		/unknown prior agent/i,
+	);
+	assert.throws(
+		() =>
+			planSpawnFollowUp({
+				run: { runId: "headless", runtime: "headless", panes: [] },
+				question: "What if?",
+			}),
+		/herdr/i,
+	);
 });
 
 test("planSpawnRun rejects unknown named agent", () => {
@@ -578,9 +649,12 @@ test("executeSpawnRun threads pane info from onStarted into result.panes", async
 		runId: "panes",
 		baseDir: root,
 	});
+	const reportedRunning = [];
 	const result = await executeSpawnRun(plan, {
+		onHerdrAgentRunning: (agentName, pane) => reportedRunning.push({ agentName, ...pane }),
 		runHerdr: async (launch, opts) => {
 			opts.onStarted?.({ paneId: `p-${launch.agentName}`, tabId: `t-${launch.agentName}` });
+			opts.onAgentRunning?.({ paneId: `p-${launch.agentName}`, tabId: `t-${launch.agentName}` });
 			if (launch.agentName === "opus") {
 				await writeFile(launch.findingPath, "opus ok\n");
 				return;
@@ -591,6 +665,10 @@ test("executeSpawnRun threads pane info from onStarted into result.panes", async
 		},
 		awaitAndCollect: (input) => awaitAndCollect({ ...input, pollMs: 10 }),
 	});
+	assert.deepEqual(
+		reportedRunning.map((p) => p.agentName).sort(),
+		["fable", "opus"],
+	);
 	assert.deepEqual(
 		result.panes.map((p) => p.agentName).sort(),
 		["fable", "opus"],
@@ -783,6 +861,87 @@ test("executeSpawnRun writes manifest that /spawn status can read after a partia
 	assert.equal(runs[0].pendingCount, 1);
 	assert.match(formatSpawnStatus(runs), /Delivered: 1\/2/);
 	assert.match(formatSpawnStatus(runs), /partial for status/);
+	await rm(root, { recursive: true, force: true });
+});
+
+test("executeSpawnFollowUp sends through existing panes and collects updated findings", async () => {
+	const root = await tempDir("pi-spawn-followup-exec-");
+	const plan = planSpawnFollowUp({
+		run: {
+			runId: "initial",
+			runtime: "herdr",
+			timeoutMs: null,
+			panes: [
+				{ agentName: "opus", paneId: "w7:p1" },
+				{ agentName: "fable", paneId: "w7:p2" },
+			],
+		},
+		question: "What if we use a prefix?",
+		baseDir: root,
+		followUpId: "follow",
+	});
+	const seen = [];
+	const result = await executeSpawnFollowUp(plan, {
+		runHerdrFollowUp: async (launch) => {
+			seen.push([launch.agentName, launch.paneId]);
+			await writeFile(launch.findingPath, `${launch.agentName} follow-up\n`);
+		},
+		awaitAndCollect: (input) => awaitAndCollect({ ...input, pollMs: 5 }),
+	});
+	assert.deepEqual(seen, [
+		["opus", "w7:p1"],
+		["fable", "w7:p2"],
+	]);
+	assert.equal(result.parentRunId, "initial");
+	assert.equal(result.findings.length, 2);
+	assert.equal(result.missing.length, 0);
+	assert.equal(result.runDirKept, false);
+	await rm(root, { recursive: true, force: true });
+});
+
+test("executeSpawnFollowUp keeps a manifest and run dir when an existing pane fails", async () => {
+	const { manifestPathFor } = await import("./core.mjs");
+	const root = await tempDir("pi-spawn-followup-fail-");
+	const plan = planSpawnFollowUp({
+		run: { runId: "initial", runtime: "herdr", panes: [{ agentName: "opus", paneId: "closed-pane" }] },
+		question: "What if?",
+		baseDir: root,
+		followUpId: "failed",
+	});
+	delete plan.brief;
+	const result = await executeSpawnFollowUp(plan, {
+		runHerdrFollowUp: async () => {
+			throw new Error("herdr agent follow-up failed: pane is closed");
+		},
+	});
+	assert.equal(result.runDirKept, true);
+	assert.ok(result.startErrors.some((error) => /closed/.test(error.error)));
+	assert.ok(result.missing.some((missing) => /follow-up error/.test(missing.reason)));
+	assert.equal(result.brief, "Follow-up: What if?");
+	assert.equal(result.panes[0].running, false);
+	const manifest = JSON.parse(await readFile(manifestPathFor(plan.runDir), "utf8"));
+	assert.equal(manifest.brief, "Follow-up: What if?");
+	assert.equal(manifest.status, "partial");
+	assert.equal(manifest.agents[0].status, "missing");
+	await rm(root, { recursive: true, force: true });
+});
+
+test("executeSpawnFollowUp continues when manifest writes fail", async () => {
+	const root = await tempDir("pi-spawn-followup-manifest-fail-");
+	const plan = planSpawnFollowUp({
+		run: { runId: "initial", runtime: "herdr", panes: [{ agentName: "opus", paneId: "w7:p1" }] },
+		question: "What if?",
+		baseDir: root,
+		followUpId: "manifest-fail",
+	});
+	const result = await executeSpawnFollowUp(plan, {
+		writeFile: async () => {
+			throw new Error("disk full");
+		},
+		runHerdrFollowUp: async (launch) => writeFile(launch.findingPath, "answer\n"),
+	});
+	assert.equal(result.findings.length, 1);
+	assert.equal(result.runDirKept, false);
 	await rm(root, { recursive: true, force: true });
 });
 
@@ -1066,6 +1225,55 @@ test("defaultRunHeadless omits timeoutMs when null", async () => {
 	assert.equal(calls[0].options.timeoutMs, undefined);
 });
 
+test("defaultRunHerdrFollowUp prompts an existing pane without creating a tab", async () => {
+	const { defaultRunHerdrFollowUp } = await import("./runners.mjs");
+	const calls = [];
+	await defaultRunHerdrFollowUp(
+		{ paneId: "w7:p2", prompt: "What if?", timeoutMs: null },
+		{
+			runCommand: async (_cmd, args, options) => {
+				calls.push({ args, options });
+				return { stdout: "{}", stderr: "", code: 0 };
+			},
+		},
+	);
+	assert.equal(calls.length, 1);
+	assert.deepEqual(calls[0].args.slice(0, 4), ["agent", "prompt", "w7:p2", "What if?"]);
+	assert.ok(calls[0].args.includes("--wait"));
+	assert.ok(!calls[0].args.includes("--timeout"));
+	assert.equal(calls[0].options.timeoutMs, undefined);
+	assert.ok(!calls.some((call) => call.args[0] === "tab"));
+
+	const timedCalls = [];
+	await assert.rejects(
+		() =>
+			defaultRunHerdrFollowUp(
+				{ paneId: "closed", prompt: "What if?", timeoutMs: 123 },
+				{
+					runCommand: async (_cmd, args, options) => {
+						timedCalls.push({ args, options });
+						return { stdout: "", stderr: "closed pane", code: 1 };
+					},
+				},
+			),
+		/closed pane/,
+	);
+	assert.ok(timedCalls[0].args.includes("--timeout"));
+	assert.ok(timedCalls[0].args.includes("123"));
+	assert.equal(timedCalls[0].options.timeoutMs, 5_123);
+});
+
+test("resolveSpawnRunners uses production follow-up runner unless overridden", async () => {
+	const { resolveSpawnRunners } = await import("./defaults.mjs");
+	const { defaultRunHeadless, defaultRunHerdr, defaultRunHerdrFollowUp } = await import("./runners.mjs");
+	const defaults = resolveSpawnRunners();
+	assert.equal(defaults.runHeadless, defaultRunHeadless);
+	assert.equal(defaults.runHerdr, defaultRunHerdr);
+	assert.equal(defaults.runHerdrFollowUp, defaultRunHerdrFollowUp);
+	const custom = async () => {};
+	assert.equal(resolveSpawnRunners({ runHerdrFollowUp: custom }).runHerdrFollowUp, custom);
+});
+
 test("defaultRunHerdr retries agent start when pane is not yet an available shell", async () => {
 	const { defaultRunHerdr } = await import("./runners.mjs");
 	const starts = [];
@@ -1174,6 +1382,7 @@ test("package.json declares spawn extension and skills", async () => {
 	assert.equal(pkg.name, "@smarzban/pi-spawn");
 	assert.deepEqual(pkg.pi.extensions, ["./index.ts"]);
 	assert.deepEqual(pkg.pi.skills, ["./skills"]);
+	assert.ok(pkg.files.includes("defaults.mjs"));
 });
 
 test("installSpawn registers /spawn command and spawn_run tool", async () => {
@@ -1181,7 +1390,15 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 	const commands = new Map();
 	const tools = new Map();
 	const messages = [];
+	const entries = [];
+	const sessionStartHandlers = [];
 	const pi = {
+		on(name, handler) {
+			if (name === "session_start") sessionStartHandlers.push(handler);
+		},
+		appendEntry(customType, data) {
+			entries.push({ customType, data });
+		},
 		registerCommand(name, opts) {
 			commands.set(name, opts);
 		},
@@ -1196,14 +1413,21 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 	await writeFile(join(dir, "spawn.json"), JSON.stringify(fixtureConfig, null, 2));
 	let sawCwd;
 	let sawHerdr;
+	let failFollowUp = false;
 	installSpawn(pi, {
 		configPath: join(dir, "spawn.json"),
 		runHeadless: async () => {
 			throw new Error("should use herdr");
 		},
-		runHerdr: async (launch) => {
+		runHerdr: async (launch, opts) => {
 			sawCwd = launch.cwd;
+			opts.onStarted?.({ paneId: `pane-${launch.agentName}`, tabId: `tab-${launch.agentName}` });
+			opts.onAgentRunning?.({ paneId: `pane-${launch.agentName}`, tabId: `tab-${launch.agentName}` });
 			await writeFile(launch.findingPath, "ok\n");
+		},
+		runHerdrFollowUp: async (launch) => {
+			if (failFollowUp) throw new Error("closed pane");
+			await writeFile(launch.findingPath, `follow-up: ${launch.question}\n`);
 		},
 		baseDir: dir,
 		getCwd: () => "/session/cwd",
@@ -1214,7 +1438,97 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 	});
 	assert.ok(commands.has("spawn"));
 	assert.ok(tools.has("spawn_run"));
+	await assert.rejects(
+		() => tools.get("spawn_follow_up").execute("none", { question: "What if?" }),
+		/No resumable Herdr spawn/,
+	);
+	assert.equal(sessionStartHandlers.length, 1);
+	await sessionStartHandlers[0](
+		{},
+		{
+			sessionManager: {
+				getEntries: () => [
+					{
+						type: "custom",
+						customType: "pi-spawn:herdr-run",
+						data: {
+							runId: "newer-run",
+							runtime: "herdr",
+							launchedAt: 2,
+							timeoutMs: null,
+							panes: [{ agentName: "opus", paneId: "newer-pane", running: true }],
+						},
+					},
+					{
+						type: "message",
+						message: {
+							role: "toolResult",
+							toolName: "spawn_run",
+							details: {
+								runId: "newer-run",
+								runtime: "herdr",
+								panes: [{ agentName: "fable", paneId: "unconfirmed-pane" }],
+							},
+						},
+					},
+					{
+						type: "custom",
+						customType: "pi-spawn:herdr-run",
+						data: {
+							runId: "dead-pane-run",
+							runtime: "herdr",
+							launchedAt: 99,
+							timeoutMs: null,
+							panes: [{ agentName: "kimi", paneId: "dead-pane", running: false }],
+						},
+					},
+					{
+						id: "legacy-run",
+						type: "message",
+						message: {
+							role: "toolResult",
+							toolName: "spawn_run",
+							details: {
+								runtime: "herdr",
+								timeoutMs: null,
+								panes: [{ agentName: "kimi", paneId: "legacy-pane" }],
+							},
+						},
+					},
+					{
+						type: "custom",
+						customType: "pi-spawn:herdr-run",
+						data: {
+							runId: "older-run",
+							runtime: "herdr",
+							launchedAt: 1,
+							timeoutMs: null,
+							panes: [{ agentName: "fable", paneId: "older-pane", running: true }],
+						},
+					},
+				],
+			},
+		},
+	);
+	const restoredFollowUp = await tools.get("spawn_follow_up").execute(
+		"restored",
+		{ question: "What if we use a prefix?" },
+		undefined,
+		undefined,
+		{ cwd: "/ignored" },
+	);
+	assert.equal(restoredFollowUp.details.panes[0].paneId, "newer-pane");
+	const legacyFollowUp = await tools.get("spawn_follow_up").execute(
+		"legacy",
+		{ question: "What if we use a prefix?", runId: "legacy-legacy-run" },
+		undefined,
+		undefined,
+		{ cwd: "/ignored" },
+	);
+	assert.equal(legacyFollowUp.details.panes[0].paneId, "legacy-pane");
+	assert.ok(tools.has("spawn_follow_up"));
 	assert.equal(tools.get("spawn_run").name, "spawn_run");
+	assert.equal(tools.get("spawn_follow_up").name, "spawn_follow_up");
 	await commands.get("spawn").handler("", { ui: { notify() {} } });
 	assert.ok(messages.some((m) => /look into/i.test(m.content) && m._opts?.triggerTurn === true));
 	await commands.get("spawn").handler("opus on this", { ui: { notify() {} } });
@@ -1240,6 +1554,44 @@ test("installSpawn registers /spawn command and spawn_run tool", async () => {
 	assert.equal(sawCwd, "/session/cwd");
 	assert.equal(sawHerdr, "1");
 	assert.equal(toolResult.details.runtime, "herdr");
+	assert.ok(entries.length >= 2);
+	assert.ok(entries.every((entry) => entry.customType === "pi-spawn:herdr-run"));
+	assert.equal(entries[0].data.panes[0].running, true);
+	const explicitOlderRun = await tools.get("spawn_follow_up").execute(
+		"older",
+		{ question: "What if we use a prefix?", runId: "newer-run" },
+		undefined,
+		undefined,
+		{ cwd: "/ignored" },
+	);
+	assert.equal(explicitOlderRun.details.panes[0].paneId, "newer-pane");
+	const followUpResult = await tools.get("spawn_follow_up").execute(
+		"id2",
+		{ question: "What if we use a prefix?", runId: toolResult.details.runId },
+		undefined,
+		undefined,
+		{ cwd: "/ignored" },
+	);
+	assert.match(followUpResult.content[0].text, /follow-up: What if we use a prefix\?/);
+	assert.equal(followUpResult.details.panes[0].paneId, "pane-opus");
+	failFollowUp = true;
+	const failedCurrent = await tools.get("spawn_follow_up").execute(
+		"failed",
+		{ question: "What if we use a prefix?", runId: toolResult.details.runId },
+		undefined,
+		undefined,
+		{ cwd: "/ignored" },
+	);
+	assert.ok(failedCurrent.details.startErrors.some((error) => /closed pane/.test(error.error)));
+	failFollowUp = false;
+	const fallback = await tools.get("spawn_follow_up").execute(
+		"fallback",
+		{ question: "What if we use a prefix?" },
+		undefined,
+		undefined,
+		{ cwd: "/ignored" },
+	);
+	assert.equal(fallback.details.panes[0].paneId, "newer-pane");
 	await rm(dir, { recursive: true, force: true });
 });
 
@@ -1250,12 +1602,15 @@ test("index.ts wires installSpawn to register spawn command and tool", async () 
 	assert.match(src, /getAgentDir\(\)/);
 	assert.match(src, /defaultRunHeadless/);
 	assert.match(src, /defaultRunHerdr/);
+	assert.match(src, /const runners = resolveSpawnRunners\(deps\)/);
+	assert.match(src, /\.\.\.runners/);
 	assert.match(src, /Type\.Object/);
 	assert.match(src, /export default function/);
 	assert.match(src, /deps\.configPath \?\? join\(getAgentDir\(\), "spawn\.json"\)/);
 	const installSrc = await readFile(join(dirname(fileURLToPath(import.meta.url)), "install.mjs"), "utf8");
 	assert.match(installSrc, /pi\.registerCommand\(SPAWN_COMMAND/);
 	assert.match(installSrc, /pi\.registerTool\(\{[\s\S]*name:\s*SPAWN_TOOL/);
+	assert.match(installSrc, /SPAWN_FOLLOW_UP_TOOL/);
 	assert.match(installSrc, /executeSpawnRun\(plan[\s\S]*signal/);
 	assert.match(installSrc, /formatSpawnResult\(result\)/);
 	assert.match(installSrc, /getCwd\(ctx\)/);
