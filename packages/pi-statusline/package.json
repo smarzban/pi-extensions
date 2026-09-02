@@ -36,6 +36,7 @@
 	},
 	"files": [
 		"index.ts",
+		"pr-link.mjs",
 		"README.md",
 		"LICENSE",
 		"pi-statusline.png"
@@ -44,6 +45,7 @@
 		"access": "public"
 	},
 	"scripts": {
-		"prepublishOnly": "node -e \"require('fs').accessSync('index.ts')\""
+		"test": "node --test",
+		"prepublishOnly": "npm test"
 	}
 }

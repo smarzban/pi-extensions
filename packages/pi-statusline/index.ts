@@ -21,6 +21,7 @@ import {
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
 import { hyperlink, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { renderPrSegment } from "./pr-link.mjs";
 
 // ── types ────────────────────────────────────────────────────────────
 
@@ -665,10 +666,9 @@ export default function (pi: ExtensionAPI) {
 			gitSeg = bracket(theme, g);
 		}
 
-		// Open PR only; merged and closed PRs are omitted. Always emit OSC 8 so
-		// hyperlink-capable terminals can follow the PR even when auto-detection is conservative.
-		const prText = pr ? theme.fg("accent", `#${pr.number}`) : "";
-		const prSeg = pr ? bracket(theme, hyperlink(prText, pr.url)) : "";
+		// Open PR only; merged and closed PRs are omitted. Always emit OSC 8 for safe
+		// HTTP(S) targets so capable terminals can follow it despite conservative detection.
+		const prSeg = renderPrSegment(pr, theme, bracket, hyperlink);
 
 		// Session name (first segment, when named and enabled): ⚑ name
 		// Live session first: the module-level cache is shared by every session in this
