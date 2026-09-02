@@ -4,6 +4,10 @@ All notable changes to packages in this monorepo are documented here.
 Each package is versioned and released independently under `packages/<name>`, via per-package tags
 `pi-<name>-vX.Y.Z` (see [docs/releases.md](docs/releases.md)).
 
+## pi-statusline 0.2.1 (unreleased)
+
+- Always emit safe OSC 8 links for open PR numbers, even when terminal capability detection is conservative.
+
 ## pi-spawn 0.1.0 (2026-09-01)
 
 Initial release.

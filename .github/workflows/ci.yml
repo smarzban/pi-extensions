@@ -15,10 +15,18 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Verify packages pack cleanly
+      - name: Install test dependencies
+        run: npm install --ignore-scripts --no-package-lock
+
+      - name: Verify packages
         run: |
           set -e
           for pkg in packages/*/; do
             echo "==> $pkg"
             (cd "$pkg" && npm pack --dry-run)
+            if node -e "const p=require('./$pkg/package.json'); process.exit(p.scripts?.test ? 0 : 1)"; then
+              (cd "$pkg" && npm test)
+            else
+              echo "(no test script)"
+            fi
           done
