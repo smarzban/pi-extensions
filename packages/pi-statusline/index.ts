@@ -20,7 +20,7 @@ import {
 	type ExtensionContext,
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
-import { getCapabilities, hyperlink, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { hyperlink, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 // ── types ────────────────────────────────────────────────────────────
 
@@ -665,12 +665,10 @@ export default function (pi: ExtensionAPI) {
 			gitSeg = bracket(theme, g);
 		}
 
-		// Open PR only; merged and closed PRs are omitted. Link supported terminals
-		// directly to the PR, while leaving the same plain text elsewhere.
+		// Open PR only; merged and closed PRs are omitted. Always emit OSC 8 so
+		// hyperlink-capable terminals can follow the PR even when auto-detection is conservative.
 		const prText = pr ? theme.fg("accent", `#${pr.number}`) : "";
-		const prSeg = pr
-			? bracket(theme, getCapabilities().hyperlinks ? hyperlink(prText, pr.url) : prText)
-			: "";
+		const prSeg = pr ? bracket(theme, hyperlink(prText, pr.url)) : "";
 
 		// Session name (first segment, when named and enabled): ⚑ name
 		// Live session first: the module-level cache is shared by every session in this
