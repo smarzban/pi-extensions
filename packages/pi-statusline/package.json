@@ -37,6 +37,7 @@
 	"files": [
 		"index.ts",
 		"pr-link.mjs",
+		"pr-link.d.mts",
 		"README.md",
 		"LICENSE",
 		"pi-statusline.png"
@@ -46,6 +47,6 @@
 	},
 	"scripts": {
 		"test": "node --test",
-		"prepublishOnly": "npm test"
+		"prepublishOnly": "node -e \"require('fs').accessSync('index.ts')\" && npm test"
 	}
 }
