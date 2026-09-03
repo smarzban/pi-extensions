@@ -14,8 +14,8 @@
 - [pi-pacman](packages/pi-pacman/README.md): Pac-Man working indicator, npm `@smarzban/pi-pacman`
 - [pi-statusline](packages/pi-statusline/README.md): custom footer statusline, npm `@smarzban/pi-statusline`
 - [pi-toolview](packages/pi-toolview/README.md): compact built-in tool output, npm `@smarzban/pi-toolview`
-- [pi-editor](packages/pi-editor/README.md): rounded editor and draft stash, npm `@smarzban/pi-editor` (source may be newer)
-- [pi-usage](packages/pi-usage/README.md): local cross-harness token usage dashboard, source install currently
+- [pi-editor](packages/pi-editor/README.md): rounded editor and draft stash, npm `@smarzban/pi-editor`
+- [pi-usage](packages/pi-usage/README.md): local cross-harness token usage dashboard, npm `@smarzban/pi-usage`
 - [pi-spawn](packages/pi-spawn/README.md): confirmed named-agent fan-out and Herdr follow-ups, npm `@smarzban/pi-spawn`
 
 ## Project

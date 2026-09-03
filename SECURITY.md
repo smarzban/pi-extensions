@@ -19,4 +19,4 @@ This monorepo ships pi **extensions** that run with the same privileges as pi it
 - **pi-toolview**: intercepts built-in tool display and persists its own display configuration in the Pi agent directory.
 - **pi-editor**: changes the editor UI and persists editor and draft-stash state in the Pi agent directory.
 - **pi-usage**: reads local Pi and supported harness usage records, then stores its private usage index with owner-only file permissions.
-- **pi-spawn**: starts configured child Pi processes or sends prompts to existing Herdr child sessions, then writes findings and run state under the Pi agent directory. Child agents have the tools configured for them in `spawn.json`.
+- **pi-spawn**: starts configured child Pi processes or sends prompts to existing Herdr child sessions, then writes findings and run state under the Pi agent directory. Child agents run with full Pi tools; `spawn.json` configures their model, thinking level, default set, and timeout.

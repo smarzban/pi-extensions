@@ -15,6 +15,13 @@ Initial release.
 - Confirmed named-agent fan-out through Herdr or headless Pi child processes.
 - `/spawn status` for retained partial runs and `spawn_follow_up` for existing Herdr child sessions.
 
+## pi-usage 0.1.0 (2026-09-02)
+
+Initial release.
+
+- Local token-usage dashboard for Pi, Claude Code, Codex CLI, and Grok Build.
+- Private normalized index, no credential reads or network requests.
+
 ## Monorepo (2026-08-15)
 
 - **npm scope moved from `@pi-extensions` to `@smarzban`**. The old `@pi-extensions/pi-pacman` and
