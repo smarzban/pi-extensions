@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# agent-notify: POST a small JSON "agent finished a turn" event to a webhook.
+# Portable (macOS + Linux). Never blocks, never fails: always exits 0.
+#
+# Usage:
+#   echo '{"session_id":"x"}' | agent-notify --source claude [--pick a,b,c] [--skip-if field]
+#        [--require field] [--skip-present field] [key=value ...]
+#   --skip-if F       skip when stdin field F is true
+#   --require F       skip when stdin field F is missing or empty
+#   --skip-present F  skip when stdin field F is present
+#
+# Config: ~/.config/agent-notify/env (or $AGENT_NOTIFY_ENV), overridden by env vars:
+#   AGENT_NOTIFY_URL         webhook URL (unset or empty: exit 0 silently)
+#   AGENT_NOTIFY_KEY         secret key (optional)
+#   AGENT_NOTIFY_KEY_HEADER  header name (default Authorization, sent as "Bearer KEY";
+#                            any other name, e.g. X-Webhook-Key, is sent as the raw key)
+#   AGENT_NOTIFY_MAX_CHARS   truncate long string fields (default 2000)
+
+# Snapshot env overrides, then load file, then reapply overrides.
+_u="${AGENT_NOTIFY_URL-}"; _k="${AGENT_NOTIFY_KEY-}"; _h="${AGENT_NOTIFY_KEY_HEADER-}"
+_envfile="${AGENT_NOTIFY_ENV:-$HOME/.config/agent-notify/env}"
+if [ -r "$_envfile" ]; then
+  set -a
+  # User config path, not a script in this repo.
+  # shellcheck disable=SC1090
+  . "$_envfile" 2>/dev/null
+  set +a
+fi
+[ -n "$_u" ] && AGENT_NOTIFY_URL="$_u"
+[ -n "$_k" ] && AGENT_NOTIFY_KEY="$_k"
+[ -n "$_h" ] && AGENT_NOTIFY_KEY_HEADER="$_h"
+[ -z "${AGENT_NOTIFY_URL-}" ] && exit 0
+command -v curl >/dev/null 2>&1 || exit 0
+
+source_name="unknown"; pick=""; skip_if=""; require=""; absent=""; extra=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --source) source_name="${2-}"; shift 2 ;;
+    --source=*) source_name="${1#*=}"; shift ;;
+    --pick) pick="${2-}"; shift 2 ;;
+    --skip-if) skip_if="${2-}"; shift 2 ;;
+    --require) require="${2-}"; shift 2 ;;
+    --skip-present) absent="${2-}"; shift 2 ;;
+    *=*) extra+=("$1"); shift ;;
+    *) shift ;;
+  esac
+done
+
+# grok also loads ~/.claude/settings.json hooks; it gets its own --source grok hook.
+[ "$source_name" = "claude" ] && [ -n "${GROK_HOOK_EVENT-}" ] && exit 0
+
+stdin_json=""
+if [ ! -t 0 ]; then stdin_json="$(cat 2>/dev/null)"; fi
+[ -z "$stdin_json" ] && stdin_json="{}"
+
+herdr_lines="$(env | grep '^HERDR_' 2>/dev/null)"
+
+host="$(hostname 2>/dev/null || uname -n)"
+ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+maxc="${AGENT_NOTIFY_MAX_CHARS:-2000}"
+AN_EXTRA=$(printf '%s\n' "${extra[@]}")
+export AN_STDIN="$stdin_json" AN_SOURCE="$source_name" AN_PICK="$pick" AN_SKIP="$skip_if" AN_REQ="$require" AN_ABSENT="$absent" \
+  AN_HOST="$host" AN_CWD="$PWD" AN_TS="$ts" AN_MAX="$maxc" AN_HERDR="$herdr_lines" \
+  AN_EXTRA
+
+build_node() {
+  node -e '
+const e=process.env; let i={}; try{i=JSON.parse(e.AN_STDIN)}catch{i={message:e.AN_STDIN}}
+if(typeof i!=="object"||!i||Array.isArray(i)) i={data:i};
+if(e.AN_SKIP && i[e.AN_SKIP]===true){process.exit(3)}
+if(e.AN_REQ && (i[e.AN_REQ]===undefined||i[e.AN_REQ]===null||i[e.AN_REQ]==="")){process.exit(3)}
+if(e.AN_ABSENT && e.AN_ABSENT in i){process.exit(3)}
+let o={}; if(e.AN_PICK){for(const k of e.AN_PICK.split(",")) if(k in i) o[k]=i[k]} else o=i;
+for(const l of (e.AN_EXTRA||"").split("\n")){const j=l.indexOf("=");if(j>0)o[l.slice(0,j)]=l.slice(j+1)}
+const h={}; for(const l of (e.AN_HERDR||"").split("\n")){const j=l.indexOf("=");if(j>0)h[l.slice(0,j)]=l.slice(j+1)}
+const m=+e.AN_MAX||2000; for(const k in o) if(typeof o[k]==="string"&&o[k].length>m) o[k]=o[k].slice(0,m)+"...";
+const out={event:"turn_end",source:e.AN_SOURCE,host:e.AN_HOST,cwd:o.cwd||e.AN_CWD,timestamp:e.AN_TS,...o};
+out.cwd=out.cwd||e.AN_CWD; if(Object.keys(h).length){out.herdr=h; out.herdr_pane_id=h.HERDR_PANE_ID||h.HERDR_PANE||null}
+process.stdout.write(JSON.stringify(out));'
+}
+build_python() {
+  python3 -c '
+import json,os,sys
+e=os.environ
+try: i=json.loads(e["AN_STDIN"])
+except Exception: i={"message":e["AN_STDIN"]}
+if not isinstance(i,dict): i={"data":i}
+if e.get("AN_SKIP") and i.get(e["AN_SKIP"]) is True: sys.exit(3)
+if e.get("AN_REQ") and i.get(e["AN_REQ"]) in (None,""): sys.exit(3)
+if e.get("AN_ABSENT") and e["AN_ABSENT"] in i: sys.exit(3)
+o={k:i[k] for k in e["AN_PICK"].split(",") if k in i} if e.get("AN_PICK") else i
+for l in e.get("AN_EXTRA","").split("\n"):
+  if "=" in l: k,v=l.split("=",1); o[k]=v
+h={}
+for l in e.get("AN_HERDR","").split("\n"):
+  if "=" in l: k,v=l.split("=",1); h[k]=v
+m=int(e.get("AN_MAX") or 2000)
+for k,v in list(o.items()):
+  if isinstance(v,str) and len(v)>m: o[k]=v[:m]+"..."
+out={"event":"turn_end","source":e["AN_SOURCE"],"host":e["AN_HOST"],"cwd":e["AN_CWD"],"timestamp":e["AN_TS"]}
+out.update(o); out["cwd"]=out.get("cwd") or e["AN_CWD"]
+if h: out["herdr"]=h; out["herdr_pane_id"]=h.get("HERDR_PANE_ID") or h.get("HERDR_PANE")
+sys.stdout.write(json.dumps(out))'
+}
+
+if command -v node >/dev/null 2>&1; then payload="$(build_node 2>/dev/null)"; rc=$?
+elif command -v python3 >/dev/null 2>&1; then payload="$(build_python 2>/dev/null)"; rc=$?
+else exit 0; fi
+[ "$rc" -ne 0 ] && exit 0
+[ -z "$payload" ] && exit 0
+
+hdr="${AGENT_NOTIFY_KEY_HEADER:-Authorization}"
+key="${AGENT_NOTIFY_KEY-}"
+url="$AGENT_NOTIFY_URL"
+# Pass auth header via a curl config on stdin-free fd so the key never shows in `ps`.
+(
+  cfg="$(mktemp "${TMPDIR:-/tmp}/agent-notify.XXXXXX" 2>/dev/null)" || exit 0
+  chmod 600 "$cfg" 2>/dev/null
+  if [ -n "$key" ]; then
+    if [ "$hdr" = "Authorization" ]; then v="Bearer $key"; else v="$key"; fi
+    # Double-quoted curl config decodes \\ as \ and \" as ". Escape backslash first.
+    hdr=${hdr//\\/\\\\}
+    hdr=${hdr//\"/\\\"}
+    v=${v//\\/\\\\}
+    v=${v//\"/\\\"}
+    printf 'header = "%s: %s"\n' "$hdr" "$v" > "$cfg"
+  fi
+  printf '%s' "$payload" | curl -sS -o /dev/null --max-time 5 -X POST \
+    -H 'Content-Type: application/json' -K "$cfg" --data-binary @- "$url" >/dev/null 2>&1
+  rm -f "$cfg"
+) </dev/null >/dev/null 2>&1 &
+exit 0

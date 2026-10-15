@@ -1,0 +1,16 @@
+{
+  "name": "@smarzban/pi-agent-notify",
+  "version": "0.1.0",
+  "description": "POST a small JSON event to a webhook when Pi (or Claude Code) finishes a turn",
+  "type": "module",
+  "keywords": ["pi-package", "pi-extension", "notify", "webhook"],
+  "author": "Saeed Marzban",
+  "license": "MIT",
+  "repository": {"type":"git","url":"git+https://github.com/smarzban/pi-extensions.git","directory":"packages/pi-agent-notify"},
+  "homepage": "https://github.com/smarzban/pi-extensions/tree/main/packages/pi-agent-notify#readme",
+  "engines": {"node": ">=20.0.0"},
+  "pi": {"extensions":["./index.ts"]},
+  "peerDependencies": {"@earendil-works/pi-coding-agent":"*"},
+  "files": ["index.ts", "bin/agent-notify", "README.md", "LICENSE"],
+  "publishConfig": {"access":"public"}
+}

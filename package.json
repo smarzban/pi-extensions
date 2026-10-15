@@ -15,7 +15,8 @@
 			"./packages/pi-toolview",
 			"./packages/pi-editor",
 			"./packages/pi-usage",
-			"./packages/pi-spawn"
+			"./packages/pi-spawn",
+			"./packages/pi-agent-notify"
 		],
 		"themes": [
 			"./themes"
