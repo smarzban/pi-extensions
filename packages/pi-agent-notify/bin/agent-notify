@@ -3,7 +3,11 @@
 # Portable (macOS + Linux). Never blocks, never fails: always exits 0.
 #
 # Usage:
-#   echo '{"session_id":"x"}' | agent-notify --source claude [--pick a,b,c] [--skip-if field] [key=value ...]
+#   echo '{"session_id":"x"}' | agent-notify --source claude [--pick a,b,c] [--skip-if field]
+#        [--require field] [--skip-present field] [key=value ...]
+#   --skip-if F       skip when stdin field F is true
+#   --require F       skip when stdin field F is missing or empty
+#   --skip-present F  skip when stdin field F is present
 #
 # Config: ~/.config/agent-notify/env (or $AGENT_NOTIFY_ENV), overridden by env vars:
 #   AGENT_NOTIFY_URL         webhook URL (unset or empty: exit 0 silently)
@@ -24,17 +28,22 @@ fi
 [ -z "${AGENT_NOTIFY_URL-}" ] && exit 0
 command -v curl >/dev/null 2>&1 || exit 0
 
-source_name="unknown"; pick=""; skip_if=""; extra=()
+source_name="unknown"; pick=""; skip_if=""; require=""; absent=""; extra=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --source) source_name="${2-}"; shift 2 ;;
     --source=*) source_name="${1#*=}"; shift ;;
     --pick) pick="${2-}"; shift 2 ;;
     --skip-if) skip_if="${2-}"; shift 2 ;;
+    --require) require="${2-}"; shift 2 ;;
+    --skip-present) absent="${2-}"; shift 2 ;;
     *=*) extra+=("$1"); shift ;;
     *) shift ;;
   esac
 done
+
+# grok also loads ~/.claude/settings.json hooks; it gets its own --source grok hook.
+[ "$source_name" = "claude" ] && [ -n "${GROK_HOOK_EVENT-}" ] && exit 0
 
 stdin_json=""
 if [ ! -t 0 ]; then stdin_json="$(cat 2>/dev/null)"; fi
@@ -45,7 +54,7 @@ herdr_lines="$(env | grep '^HERDR_' 2>/dev/null)"
 host="$(hostname 2>/dev/null || uname -n)"
 ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 maxc="${AGENT_NOTIFY_MAX_CHARS:-2000}"
-export AN_STDIN="$stdin_json" AN_SOURCE="$source_name" AN_PICK="$pick" AN_SKIP="$skip_if" \
+export AN_STDIN="$stdin_json" AN_SOURCE="$source_name" AN_PICK="$pick" AN_SKIP="$skip_if" AN_REQ="$require" AN_ABSENT="$absent" \
   AN_HOST="$host" AN_CWD="$PWD" AN_TS="$ts" AN_MAX="$maxc" AN_HERDR="$herdr_lines" \
   AN_EXTRA="$(printf '%s\n' "${extra[@]}")"
 
@@ -54,6 +63,8 @@ build_node() {
 const e=process.env; let i={}; try{i=JSON.parse(e.AN_STDIN)}catch{i={message:e.AN_STDIN}}
 if(typeof i!=="object"||!i||Array.isArray(i)) i={data:i};
 if(e.AN_SKIP && i[e.AN_SKIP]===true){process.exit(3)}
+if(e.AN_REQ && (i[e.AN_REQ]===undefined||i[e.AN_REQ]===null||i[e.AN_REQ]==="")){process.exit(3)}
+if(e.AN_ABSENT && e.AN_ABSENT in i){process.exit(3)}
 let o={}; if(e.AN_PICK){for(const k of e.AN_PICK.split(",")) if(k in i) o[k]=i[k]} else o=i;
 for(const l of (e.AN_EXTRA||"").split("\n")){const j=l.indexOf("=");if(j>0)o[l.slice(0,j)]=l.slice(j+1)}
 const h={}; for(const l of (e.AN_HERDR||"").split("\n")){const j=l.indexOf("=");if(j>0)h[l.slice(0,j)]=l.slice(j+1)}
@@ -70,6 +81,8 @@ try: i=json.loads(e["AN_STDIN"])
 except Exception: i={"message":e["AN_STDIN"]}
 if not isinstance(i,dict): i={"data":i}
 if e.get("AN_SKIP") and i.get(e["AN_SKIP"]) is True: sys.exit(3)
+if e.get("AN_REQ") and i.get(e["AN_REQ"]) in (None,""): sys.exit(3)
+if e.get("AN_ABSENT") and e["AN_ABSENT"] in i: sys.exit(3)
 o={k:i[k] for k in e["AN_PICK"].split(",") if k in i} if e.get("AN_PICK") else i
 for l in e.get("AN_EXTRA","").split("\n"):
   if "=" in l: k,v=l.split("=",1); o[k]=v

@@ -1,6 +1,6 @@
 # pi-agent-notify
 
-POSTs a small JSON event to a webhook whenever Pi finishes (on `agent_end`, i.e. back at the prompt). Ships the portable `agent-notify` CLI, which the Claude Code `Stop` hook uses too.
+POSTs a small JSON event to a webhook whenever Pi finishes (on `agent_end`, i.e. back at the prompt). Ships the portable `agent-notify` CLI, which the Claude Code and grok `Stop` hooks use too.
 
 ## Install
 
@@ -9,20 +9,21 @@ AGENT_NOTIFY_KEY=... bash scripts/install-agent-notify.sh --url https://example/
 # options: --url URL (or env AGENT_NOTIFY_URL), --key-from-env, --header X-Webhook-Key
 ```
 
-Installs the notifier, env file, Claude Stop hook and pi package. Rerunning is safe.
+Installs the notifier, env file, Claude Stop hook, grok Stop hook (`~/.grok/hooks/agent-notify.json`) and pi package. Rerunning is safe.
 
 ## Opt-in usage
 
-Plain `pi` and `claude` stay silent: `AGENT_NOTIFY_URL` is empty in the env file. With `--url`, the installer writes a marked block to `~/.zshrc` (replaced on rerun):
+Plain `pi`, `claude` and `grok` stay silent: `AGENT_NOTIFY_URL` is empty in the env file. With `--url`, the installer writes a marked block to `~/.zshrc` (replaced on rerun):
 
 ```bash
 # >>> agent-notify >>>
 alias pin='AGENT_NOTIFY_URL="https://example/webhook" pi'
 alias ccn='AGENT_NOTIFY_URL="https://example/webhook" claude'
+alias grokn='AGENT_NOTIFY_URL="https://example/webhook" grok'
 # <<< agent-notify <<<
 ```
 
-Use `pin` / `ccn` when you want a webhook event at the end of each turn.
+Use `pin` / `ccn` / `grokn` when you want a webhook event at the end of each turn.
 
 ## Configure
 
@@ -43,3 +44,9 @@ Use `pin` / `ccn` when you want a webhook event at the end of each turn.
 ```
 
 Claude events carry `session_id`, `cwd`, `transcript_path`, `last_assistant_message`, `hook_event_name`. Runs in the background with `curl --max-time 5`, always exits 0, and skips Claude Stop events where `stop_hook_active` is true. The key is passed to curl via a temp config file, not argv.
+
+## grok
+
+grok has Claude Code style command hooks. Its `Stop` event fires when a turn completes and the agent is back at the prompt. The installer writes `~/.grok/hooks/agent-notify.json`, which runs `agent-notify --source grok` with `sessionId`, `promptId`, `cwd`, `workspaceRoot`, `lastAssistantMessage` (grok payloads are camelCase). It skips continuation fires (`stopHookActive`), the session-teardown `Stop` (no `promptId`) and subagent stops (`subagentType`).
+
+grok also loads hooks from `~/.claude/settings.json`. The notifier ignores the Claude hook when `GROK_HOOK_EVENT` is set, so a grok turn sends exactly one event, with `source: grok`.

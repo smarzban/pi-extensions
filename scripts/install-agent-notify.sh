@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install agent-notify (webhook on agent turn end) for Claude Code and pi.
+# Install agent-notify (webhook on agent turn end) for Claude Code, grok and pi.
 # Works on macOS and Linux. Run from a checkout of smarzban/pi-extensions:
 #   bash scripts/install-agent-notify.sh            # pi package from this checkout
 #   PI_SOURCE=git:github.com/smarzban/pi-extensions bash scripts/install-agent-notify.sh
@@ -80,12 +80,13 @@ if [ -n "$URL" ]; then
     echo "# >>> agent-notify >>>"
     echo "alias pin='AGENT_NOTIFY_URL=\"$URL\" pi'"
     echo "alias ccn='AGENT_NOTIFY_URL=\"$URL\" claude'"
+    echo "alias grokn='AGENT_NOTIFY_URL=\"$URL\" grok'"
     echo "# <<< agent-notify <<<"
   } >> "$tmp"
   cat "$tmp" > "$ZSHRC"; rm -f "$tmp"
-  echo "wrote pin/ccn aliases to $ZSHRC (open a new shell or: source ~/.zshrc)"
+  echo "wrote pin/ccn/grokn aliases to $ZSHRC (open a new shell or: source ~/.zshrc)"
 else
-  echo "no URL given (--url or AGENT_NOTIFY_URL); skipped pin/ccn aliases"
+  echo "no URL given (--url or AGENT_NOTIFY_URL); skipped pin/ccn/grokn aliases"
 fi
 
 # 3. Claude Code Stop hook (merge, keep everything else)
@@ -101,10 +102,37 @@ if(!has) s.hooks.Stop.push({hooks:[{type:"command",command:cmd,timeout:10}]});
 fs.writeFileSync(f,JSON.stringify(s,null,2)+"\n");
 console.log(has?"Claude Stop hook already present":"added Claude Stop hook to "+f);'
 
+# 3b. grok Stop hook (own file in ~/.grok/hooks, rewritten on rerun)
+# grok payload is camelCase. Skip continuation fires, session-teardown Stop
+# (no promptId) and subagent stops.
+if [ -d "$HOME/.grok" ] || command -v grok >/dev/null 2>&1; then
+  mkdir -p "$HOME/.grok/hooks"
+  cat > "$HOME/.grok/hooks/agent-notify.json" <<'GROK'
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.local/bin/agent-notify --source grok --skip-if stopHookActive --require promptId --skip-present subagentType --pick sessionId,promptId,cwd,workspaceRoot,lastAssistantMessage,hook_event_name",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+GROK
+  echo "wrote grok Stop hook $HOME/.grok/hooks/agent-notify.json"
+else
+  echo "grok not found; skipped grok hook"
+fi
+
 # 4. pi extension
 if command -v pi >/dev/null 2>&1; then
   pi install "${PI_SOURCE:-$REPO}" && echo "pi package installed: ${PI_SOURCE:-$REPO}"
 else
   echo "pi not found; skip. Later: pi install ${PI_SOURCE:-$REPO}"
 fi
-echo "Done. Plain pi/claude stay silent; use pin/ccn to notify."
+echo "Done. Plain pi/claude/grok stay silent; use pin/ccn/grokn to notify."
