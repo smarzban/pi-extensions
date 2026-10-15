@@ -20,6 +20,7 @@ Each package under `packages/` is independent: its own `package.json`, entrypoin
 | [pi-toolview](packages/pi-toolview) | [`@smarzban/pi-toolview@0.1.0`](https://www.npmjs.com/package/@smarzban/pi-toolview) | Compact tool output: one-line summaries (expandable) instead of raw output |
 | [pi-editor](packages/pi-editor) | [`@smarzban/pi-editor@0.2.0`](https://www.npmjs.com/package/@smarzban/pi-editor) | Rounded input editor box + draft copy (alt+c) + stash (alt+s, per project) |
 | [pi-usage](packages/pi-usage) | [`@smarzban/pi-usage@0.1.0`](https://www.npmjs.com/package/@smarzban/pi-usage) | Private local token-usage dashboard for Pi, Claude Code, Codex CLI, and Grok Build |
+| [pi-agent-notify](packages/pi-agent-notify) | not published | Webhook event when Pi or Claude Code finishes a turn (`scripts/install-agent-notify.sh`) |
 | [pi-spawn](packages/pi-spawn) | [`@smarzban/pi-spawn@0.1.0`](https://www.npmjs.com/package/@smarzban/pi-spawn) | Fan out a confirmed brief to named Pi agents in parallel, then synthesize |
 | [pi-review-panel](https://github.com/smarzban/pi-review-panel) | [`pi-review-panel`](https://www.npmjs.com/package/pi-review-panel) | Multi-model, evidence-only PR review panel |
 
