@@ -20,7 +20,11 @@
 _u="${AGENT_NOTIFY_URL-}"; _k="${AGENT_NOTIFY_KEY-}"; _h="${AGENT_NOTIFY_KEY_HEADER-}"
 _envfile="${AGENT_NOTIFY_ENV:-$HOME/.config/agent-notify/env}"
 if [ -r "$_envfile" ]; then
-  set -a; . "$_envfile" 2>/dev/null; set +a
+  set -a
+  # User config path, not a script in this repo.
+  # shellcheck disable=SC1090
+  . "$_envfile" 2>/dev/null
+  set +a
 fi
 [ -n "$_u" ] && AGENT_NOTIFY_URL="$_u"
 [ -n "$_k" ] && AGENT_NOTIFY_KEY="$_k"
@@ -54,9 +58,10 @@ herdr_lines="$(env | grep '^HERDR_' 2>/dev/null)"
 host="$(hostname 2>/dev/null || uname -n)"
 ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 maxc="${AGENT_NOTIFY_MAX_CHARS:-2000}"
+AN_EXTRA=$(printf '%s\n' "${extra[@]}")
 export AN_STDIN="$stdin_json" AN_SOURCE="$source_name" AN_PICK="$pick" AN_SKIP="$skip_if" AN_REQ="$require" AN_ABSENT="$absent" \
   AN_HOST="$host" AN_CWD="$PWD" AN_TS="$ts" AN_MAX="$maxc" AN_HERDR="$herdr_lines" \
-  AN_EXTRA="$(printf '%s\n' "${extra[@]}")"
+  AN_EXTRA
 
 build_node() {
   node -e '
@@ -113,6 +118,11 @@ url="$AGENT_NOTIFY_URL"
   chmod 600 "$cfg" 2>/dev/null
   if [ -n "$key" ]; then
     if [ "$hdr" = "Authorization" ]; then v="Bearer $key"; else v="$key"; fi
+    # Double-quoted curl config decodes \\ as \ and \" as ". Escape backslash first.
+    hdr=${hdr//\\/\\\\}
+    hdr=${hdr//\"/\\\"}
+    v=${v//\\/\\\\}
+    v=${v//\"/\\\"}
     printf 'header = "%s: %s"\n' "$hdr" "$v" > "$cfg"
   fi
   printf '%s' "$payload" | curl -sS -o /dev/null --max-time 5 -X POST \
