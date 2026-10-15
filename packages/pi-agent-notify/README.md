@@ -5,8 +5,24 @@ POSTs a small JSON event to a webhook whenever Pi finishes (on `agent_end`, i.e.
 ## Install
 
 ```bash
-bash scripts/install-agent-notify.sh   # notifier, env file, Claude Stop hook, pi package
+AGENT_NOTIFY_KEY=... bash scripts/install-agent-notify.sh --url https://example/webhook --key-from-env
+# options: --url URL (or env AGENT_NOTIFY_URL), --key-from-env, --header X-Webhook-Key
 ```
+
+Installs the notifier, env file, Claude Stop hook and pi package. Rerunning is safe.
+
+## Opt-in usage
+
+Plain `pi` and `claude` stay silent: `AGENT_NOTIFY_URL` is empty in the env file. With `--url`, the installer writes a marked block to `~/.zshrc` (replaced on rerun):
+
+```bash
+# >>> agent-notify >>>
+alias pin='AGENT_NOTIFY_URL="https://example/webhook" pi'
+alias ccn='AGENT_NOTIFY_URL="https://example/webhook" claude'
+# <<< agent-notify <<<
+```
+
+Use `pin` / `ccn` when you want a webhook event at the end of each turn.
 
 ## Configure
 
@@ -14,7 +30,7 @@ bash scripts/install-agent-notify.sh   # notifier, env file, Claude Stop hook, p
 
 | Var | Meaning |
 | --- | --- |
-| `AGENT_NOTIFY_URL` | Webhook URL. Empty: do nothing. |
+| `AGENT_NOTIFY_URL` | Webhook URL. Empty in the file by default (off); a non-empty env var turns it on for that run. |
 | `AGENT_NOTIFY_KEY` | Secret. |
 | `AGENT_NOTIFY_KEY_HEADER` | Default `Authorization` (sent as `Bearer KEY`). Any other name, e.g. `X-Webhook-Key`, sends the raw key. |
 | `AGENT_NOTIFY_BIN` | Override notifier path used by the pi extension. |
